@@ -1,5 +1,5 @@
 // Pinterest Archiver Bookmarklet
-// Downloads pin images into a single zip file
+// Downloads pin images into a single zip file with section support
 
 (function() {
   var e = document.getElementById('pa-overlay');
@@ -8,6 +8,8 @@
   var totalPins = 0;
   var boardName = '';
   var isDownloading = false;
+  var boardSections = []; // Array of {name, url, pinCount}
+  var currentSection = null; // null = main board, otherwise section name
 
   var s = document.createElement('style');
   s.textContent = '#pa-overlay{position:fixed;top:20px;right:20px;width:340px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.2);z-index:999999;font-family:system-ui,sans-serif;color:#333;max-height:90vh;overflow:auto}#pa-overlay *{box-sizing:border-box}.pa-h{padding:16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}.pa-h h2{margin:0;font-size:16px}.pa-x{background:none;border:none;font-size:20px;cursor:pointer;color:#666}.pa-c{padding:16px}.pa-i{margin-bottom:16px}.pa-n{font-size:18px;font-weight:600;margin-bottom:4px}.pa-p{font-size:14px;color:#666}.pa-t{font-size:12px;color:#888;margin:12px 0 8px;text-transform:uppercase}.pa-b{display:block;width:100%;padding:12px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;background:#fff;font-size:14px;cursor:pointer}.pa-b:hover{background:#f5f5f5}.pa-b:disabled{opacity:.5}.pa-bp{background:#e60023;color:#fff;border-color:#e60023}.pa-bp:hover{background:#ad081b}.pa-r{display:flex;gap:8px}.pa-r .pa-b{flex:1;margin:0}.pa-s{padding:12px;background:#f8f8f8;border-radius:8px;font-size:13px;color:#666;margin-top:12px;display:none}.pa-s.on{display:block}.pa-g{height:4px;background:#eee;border-radius:2px;margin-top:8px}.pa-gb{height:100%;background:#e60023;width:0;transition:width .3s}.pa-m{background:#fff3cd;padding:10px;border-radius:8px;font-size:12px;margin-top:12px;display:none}.pa-m.on{display:block}';
@@ -141,7 +143,150 @@
       var p = location.pathname.split('/').filter(Boolean);
       boardName = p[p.length - 1] || 'board';
     }
-    return { n: boardName, t: totalPins };
+
+    // Detect if we're in a section (URL has extra path segment after board)
+    var pathParts = location.pathname.split('/').filter(Boolean);
+    // Pattern: /username/boardname or /username/boardname/sectionname
+    if (pathParts.length >= 3) {
+      // We might be in a section - check if 3rd part isn't a system route
+      var thirdPart = pathParts[2];
+      var systemRoutes = ['pins', 'more_ideas', 'followers', 'activity', 'settings', 'edit', 'invite', 'organize'];
+      if (systemRoutes.indexOf(thirdPart) === -1) {
+        currentSection = decodeURIComponent(thirdPart).replace(/-/g, ' ');
+      }
+    }
+
+    return { n: boardName, t: totalPins, section: currentSection };
+  }
+
+  // Detect sections on the board page using multiple strategies
+  function detectSections() {
+    boardSections = [];
+    var pathParts = location.pathname.split('/').filter(Boolean);
+    if (pathParts.length < 2) return boardSections;
+
+    var username = pathParts[0];
+    var boardSlug = pathParts[1];
+    var boardPath = '/' + username + '/' + boardSlug;
+    var sectionSet = new Set();
+
+    // Strategy 1: Look for section links in the page
+    var allLinks = document.querySelectorAll('a[href]');
+    allLinks.forEach(function(link) {
+      var href = link.getAttribute('href') || '';
+      if (href.indexOf(boardPath + '/') === 0) {
+        var remainder = href.slice(boardPath.length + 1).split('/')[0].split('?')[0];
+        if (remainder && remainder.length > 0) {
+          var systemRoutes = ['pins', 'more_ideas', 'followers', 'activity', 'settings', 'edit', 'invite', 'organize', 'collaborators'];
+          if (systemRoutes.indexOf(remainder) === -1 && !sectionSet.has(remainder)) {
+            sectionSet.add(remainder);
+            addSection(remainder, link, boardPath);
+          }
+        }
+      }
+    });
+
+    // Strategy 2: Look for section containers with data attributes
+    var sectionContainers = document.querySelectorAll('[data-test-id*="section"], [data-test-id*="board-section"]');
+    sectionContainers.forEach(function(container) {
+      var link = container.querySelector('a[href*="/' + boardSlug + '/"]');
+      if (link) {
+        var href = link.getAttribute('href') || '';
+        var match = href.match(new RegExp(boardPath + '/([^/?]+)'));
+        if (match && !sectionSet.has(match[1])) {
+          sectionSet.add(match[1]);
+          addSection(match[1], container, boardPath);
+        }
+      }
+    });
+
+    // Strategy 3: Look for elements that look like section headers/titles
+    var headings = document.querySelectorAll('h2, h3, [role="heading"]');
+    headings.forEach(function(heading) {
+      var parent = heading.closest('a[href*="/' + boardSlug + '/"]');
+      if (parent) {
+        var href = parent.getAttribute('href') || '';
+        var match = href.match(new RegExp(boardPath + '/([^/?]+)'));
+        if (match && !sectionSet.has(match[1])) {
+          sectionSet.add(match[1]);
+          addSection(match[1], parent, boardPath);
+        }
+      }
+    });
+
+    // Strategy 4: Parse Pinterest's embedded data if available
+    try {
+      var scripts = document.querySelectorAll('script[type="application/json"], script[id*="__PWS"]');
+      scripts.forEach(function(script) {
+        var text = script.textContent || '';
+        // Look for section patterns in JSON
+        var sectionMatches = text.match(/"slug":"([^"]+)"[^}]*"type":"boardSection"/gi);
+        if (sectionMatches) {
+          sectionMatches.forEach(function(m) {
+            var slugMatch = m.match(/"slug":"([^"]+)"/);
+            if (slugMatch && !sectionSet.has(slugMatch[1])) {
+              sectionSet.add(slugMatch[1]);
+              addSection(slugMatch[1], null, boardPath);
+            }
+          });
+        }
+      });
+    } catch (e) {}
+
+    function addSection(slug, element, basePath) {
+      var sectionName = decodeURIComponent(slug).replace(/-/g, ' ');
+      var pinCount = 0;
+
+      // Try to get better name from element
+      if (element) {
+        var nameEl = element.querySelector('h2, h3, [role="heading"]') || element;
+        var text = nameEl.textContent.trim();
+        // Clean up the text - remove pin counts, etc.
+        var cleanText = text.replace(/\d+\s*(pins?|Pins?)/gi, '').trim();
+        if (cleanText && cleanText.length > 0 && cleanText.length < 60) {
+          sectionName = cleanText;
+        }
+
+        // Try to find pin count
+        var countMatch = (element.textContent || '').match(/(\d+)\s*(pins?|Pins?)/i);
+        if (countMatch) {
+          pinCount = parseInt(countMatch[1], 10);
+        }
+      }
+
+      boardSections.push({
+        name: sectionName,
+        slug: slug,
+        url: basePath + '/' + slug,
+        pinCount: pinCount
+      });
+    }
+
+    // Sort sections alphabetically
+    boardSections.sort(function(a, b) {
+      return a.name.localeCompare(b.name);
+    });
+
+    return boardSections;
+  }
+
+  // Async version that scrolls to load sections first
+  async function detectSectionsAsync() {
+    // First, try to detect without scrolling
+    detectSections();
+    if (boardSections.length > 0) return boardSections;
+
+    // Scroll down briefly to trigger lazy loading of sections
+    var originalScroll = window.scrollY;
+    window.scrollTo(0, 500);
+    await sleep(500);
+    window.scrollTo(0, 1000);
+    await sleep(500);
+    window.scrollTo(0, originalScroll);
+    await sleep(300);
+
+    // Try detection again
+    return detectSections();
   }
 
   function esc(x) {
@@ -150,14 +295,25 @@
     return d.innerHTML;
   }
 
-  function createUI() {
+  async function createUI() {
     var info = getBoardInfo();
     var overlay = document.createElement('div');
     overlay.id = 'pa-overlay';
 
+    // Initial UI without sections (will update after async detection)
     var html = '<div class="pa-h"><h2>Pinterest Archiver</h2><button class="pa-x" id="pa-x">x</button></div>';
     html += '<div class="pa-c"><div class="pa-i"><div class="pa-n">' + esc(info.n) + '</div>';
+
+    // Show section info if we're in a section
+    if (info.section) {
+      html += '<div class="pa-p" style="color:#e60023">Section: ' + esc(info.section) + '</div>';
+    }
+
     html += '<div class="pa-p">' + info.t.toLocaleString() + ' pins</div></div>';
+
+    // Sections panel placeholder
+    html += '<div id="pa-sections-panel"></div>';
+
     html += '<div id="pa-btns"><button class="pa-b pa-bp" data-s="0" data-e="1">Download All</button>';
 
     if (info.t > 200) {
@@ -185,12 +341,111 @@
 
     document.getElementById('pa-x').onclick = function() { overlay.remove(); };
 
-    var btns = document.querySelectorAll('#pa-btns .pa-b');
-    for (var k = 0; k < btns.length; k++) {
-      btns[k].onclick = function(ev) {
-        if (isDownloading) return;
-        startDownload(parseFloat(ev.target.dataset.s), parseFloat(ev.target.dataset.e));
-      };
+    // Bind download buttons
+    function bindButtons() {
+      var btns = document.querySelectorAll('#pa-btns .pa-b');
+      for (var k = 0; k < btns.length; k++) {
+        btns[k].onclick = function(ev) {
+          if (isDownloading) return;
+          // Get selected sections
+          var selectedSections = getSelectedSections();
+          startDownload(parseFloat(ev.target.dataset.s), parseFloat(ev.target.dataset.e), selectedSections);
+        };
+      }
+    }
+
+    // Get selected sections from checkboxes
+    function getSelectedSections() {
+      var selected = [];
+      var checkboxes = document.querySelectorAll('.pa-section-cb:checked');
+      checkboxes.forEach(function(cb) {
+        var idx = parseInt(cb.dataset.idx, 10);
+        if (boardSections[idx]) {
+          selected.push(boardSections[idx]);
+        }
+      });
+      return selected;
+    }
+
+    // Update sections panel
+    function updateSectionsPanel(sections) {
+      var panel = document.getElementById('pa-sections-panel');
+      if (!panel) return;
+
+      if (info.section) {
+        // We're in a section, don't show section panel
+        panel.innerHTML = '';
+        return;
+      }
+
+      var html = '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+      html += '<span style="font-weight:600;font-size:13px">Sections</span>';
+      html += '<button id="pa-scan-sections" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer">Scan Again</button>';
+      html += '</div>';
+
+      if (sections.length === 0) {
+        html += '<div style="color:#888;font-size:12px;padding:8px 0">No sections detected. Click "Scan Again" after scrolling down the page.</div>';
+      } else {
+        html += '<div style="margin-bottom:8px"><label style="display:flex;align-items:center;cursor:pointer;font-size:12px">';
+        html += '<input type="checkbox" id="pa-select-all-sections" checked style="margin-right:6px">';
+        html += '<span>Select all (' + sections.length + ' sections)</span></label></div>';
+        html += '<div style="max-height:150px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;background:#fff">';
+
+        sections.forEach(function(sec, idx) {
+          html += '<label style="display:flex;align-items:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:12px">';
+          html += '<input type="checkbox" class="pa-section-cb" data-idx="' + idx + '" checked style="margin-right:8px">';
+          html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(sec.name) + '</span>';
+          if (sec.pinCount > 0) {
+            html += '<span style="color:#888;font-size:11px;margin-left:8px">' + sec.pinCount + ' pins</span>';
+          }
+          html += '</label>';
+        });
+
+        html += '</div>';
+      }
+
+      html += '</div>';
+      panel.innerHTML = html;
+
+      // Bind scan button
+      var scanBtn = document.getElementById('pa-scan-sections');
+      if (scanBtn) {
+        scanBtn.onclick = async function() {
+          scanBtn.disabled = true;
+          scanBtn.textContent = 'Scanning...';
+          await detectSectionsAsync();
+          updateSectionsPanel(boardSections);
+        };
+      }
+
+      // Bind select all checkbox
+      var selectAllCb = document.getElementById('pa-select-all-sections');
+      if (selectAllCb) {
+        selectAllCb.onchange = function() {
+          var checkboxes = document.querySelectorAll('.pa-section-cb');
+          checkboxes.forEach(function(cb) {
+            cb.checked = selectAllCb.checked;
+          });
+        };
+      }
+
+      // Update select all when individual checkboxes change
+      var sectionCbs = document.querySelectorAll('.pa-section-cb');
+      sectionCbs.forEach(function(cb) {
+        cb.onchange = function() {
+          var allChecked = document.querySelectorAll('.pa-section-cb:checked').length === sectionCbs.length;
+          if (selectAllCb) selectAllCb.checked = allChecked;
+        };
+      });
+    }
+
+    bindButtons();
+
+    // Detect sections (async to allow scrolling if needed)
+    if (!info.section) {
+      var sections = await detectSectionsAsync();
+      updateSectionsPanel(sections);
     }
   }
 
@@ -225,9 +480,6 @@
     return url.replace(/\/\d+x\d*\//, '/originals/');
   }
 
-  // Track pins by their unique ID - Map<pinId, imageUrl>
-  var pinData = new Map();
-
   function isValidPinImage(url) {
     if (!url || url.indexOf('pinimg.com') === -1) return false;
     if (url.indexOf('/avatars/') !== -1) return false;
@@ -235,106 +487,96 @@
     return true;
   }
 
-  function extractImageFromContainer(container) {
-    // Try multiple sources for the image
-    var img = container.querySelector('img[src*="pinimg.com"]');
-    if (img && isValidPinImage(img.src)) {
-      return getOriginalUrl(img.src);
-    }
+  async function scrollAndCollect(sectionLabel, targetWin) {
+    // targetWin allows us to collect from a different window (for sections opened in new tabs)
+    var win = targetWin || window;
+    var doc = win.document;
 
-    // Try srcset
-    var imgWithSrcset = container.querySelector('img[srcset*="pinimg.com"]');
-    if (imgWithSrcset) {
-      var srcset = imgWithSrcset.srcset || '';
-      var match = srcset.match(/https?:\/\/[^\s,]+pinimg\.com[^\s,]+/);
-      if (match && isValidPinImage(match[0])) {
-        return getOriginalUrl(match[0]);
-      }
-    }
-
-    // Try data-src
-    var lazyImg = container.querySelector('img[data-src*="pinimg.com"]');
-    if (lazyImg) {
-      var dataSrc = lazyImg.getAttribute('data-src');
-      if (isValidPinImage(dataSrc)) {
-        return getOriginalUrl(dataSrc);
-      }
-    }
-
-    // Try video poster
-    var video = container.querySelector('video[poster*="pinimg.com"]');
-    if (video && isValidPinImage(video.poster)) {
-      return getOriginalUrl(video.poster);
-    }
-
-    // Try background image
-    var allEls = container.querySelectorAll('*');
-    for (var i = 0; i < allEls.length; i++) {
-      var el = allEls[i];
-      var style = el.getAttribute('style') || '';
-      if (style.indexOf('pinimg') !== -1) {
-        var bgMatch = style.match(/url\(["']?(https?:\/\/[^"')]+pinimg[^"')]+)/i);
-        if (bgMatch && isValidPinImage(bgMatch[1])) {
-          return getOriginalUrl(bgMatch[1]);
-        }
-      }
-    }
-
-    return null;
-  }
-
-  // Scan page and collect all pins by their unique ID
-  function collectPins() {
-    // Find all pin links on the page
-    var pinLinks = document.querySelectorAll('a[href*="/pin/"]');
-
-    pinLinks.forEach(function(link) {
-      // Extract pin ID from href
-      var match = link.href.match(/\/pin\/(\d+)/);
-      if (!match) return;
-
-      var pinId = match[1];
-
-      // Skip if we already have this pin with an image
-      if (pinData.has(pinId) && pinData.get(pinId)) return;
-
-      // Find the pin container (walk up the DOM)
-      var container = link.closest('[data-test-id="pin"]') ||
-                      link.closest('[data-test-id="pinWrapper"]') ||
-                      link.closest('[data-grid-item="true"]') ||
-                      link.closest('[role="listitem"]') ||
-                      link.parentElement?.parentElement?.parentElement;
-
-      if (!container) return;
-
-      // Skip if this is in header/nav (not a board pin)
-      if (container.closest('header, nav, [data-test-id="header"]')) return;
-
-      // Try to get the image URL
-      var imageUrl = extractImageFromContainer(container);
-
-      if (imageUrl) {
-        pinData.set(pinId, imageUrl);
-      } else if (!pinData.has(pinId)) {
-        // Mark this pin as found but image not yet loaded
-        pinData.set(pinId, null);
-      }
-    });
-
-    return pinData;
-  }
-
-  async function scrollAndCollect() {
     return new Promise(async function(done) {
       var lastCount = 0, sameCount = 0;
       var maxScrollAttempts = 300;
       var scrollAttempt = 0;
       var targetPins = totalPins || 100;
+      var label = sectionLabel ? ('section "' + sectionLabel + '"') : 'main board';
 
-      stat('Scanning for pins...', 0);
+      stat('Scanning ' + label + ' for pins...', 0);
 
-      // Clear previous data
-      pinData.clear();
+      // Use a local map for this collection
+      var localPinData = new Map();
+
+      // Local version of collectPins that works on any document
+      function collectPinsFromDoc() {
+        var pinLinks = doc.querySelectorAll('a[href*="/pin/"]');
+
+        pinLinks.forEach(function(link) {
+          var match = link.href.match(/\/pin\/(\d+)/);
+          if (!match) return;
+
+          var pinId = match[1];
+          if (localPinData.has(pinId) && localPinData.get(pinId)) return;
+
+          var container = link.closest('[data-test-id="pin"]') ||
+                          link.closest('[data-test-id="pinWrapper"]') ||
+                          link.closest('[data-grid-item="true"]') ||
+                          link.closest('[role="listitem"]') ||
+                          link.parentElement?.parentElement?.parentElement;
+
+          if (!container) return;
+          if (container.closest('header, nav, [data-test-id="header"]')) return;
+
+          var imageUrl = extractImageFromContainerDoc(container);
+
+          if (imageUrl) {
+            localPinData.set(pinId, imageUrl);
+          } else if (!localPinData.has(pinId)) {
+            localPinData.set(pinId, null);
+          }
+        });
+      }
+
+      // Local version of extractImageFromContainer
+      function extractImageFromContainerDoc(container) {
+        var img = container.querySelector('img[src*="pinimg.com"]');
+        if (img && isValidPinImage(img.src)) {
+          return getOriginalUrl(img.src);
+        }
+
+        var imgWithSrcset = container.querySelector('img[srcset*="pinimg.com"]');
+        if (imgWithSrcset) {
+          var srcset = imgWithSrcset.srcset || '';
+          var match = srcset.match(/https?:\/\/[^\s,]+pinimg\.com[^\s,]+/);
+          if (match && isValidPinImage(match[0])) {
+            return getOriginalUrl(match[0]);
+          }
+        }
+
+        var lazyImg = container.querySelector('img[data-src*="pinimg.com"]');
+        if (lazyImg) {
+          var dataSrc = lazyImg.getAttribute('data-src');
+          if (isValidPinImage(dataSrc)) {
+            return getOriginalUrl(dataSrc);
+          }
+        }
+
+        var video = container.querySelector('video[poster*="pinimg.com"]');
+        if (video && isValidPinImage(video.poster)) {
+          return getOriginalUrl(video.poster);
+        }
+
+        var allEls = container.querySelectorAll('*');
+        for (var i = 0; i < allEls.length; i++) {
+          var el = allEls[i];
+          var style = el.getAttribute('style') || '';
+          if (style.indexOf('pinimg') !== -1) {
+            var bgMatch = style.match(/url\(["']?(https?:\/\/[^"')]+pinimg[^"')]+)/i);
+            if (bgMatch && isValidPinImage(bgMatch[1])) {
+              return getOriginalUrl(bgMatch[1]);
+            }
+          }
+        }
+
+        return null;
+      }
 
       async function step() {
         scrollAttempt++;
@@ -344,20 +586,19 @@
         }
 
         // Collect pins at current scroll position
-        collectPins();
+        collectPinsFromDoc();
 
         // Count pins with images
         var withImages = 0;
-        pinData.forEach(function(url) { if (url) withImages++; });
+        localPinData.forEach(function(url) { if (url) withImages++; });
 
         var progress = targetPins > 0 ? withImages / targetPins : 0;
-        stat('Found ' + withImages + ' of ' + targetPins + ' pins (IDs: ' + pinData.size + ')...', Math.min(progress, 1));
+        stat(label + ': ' + withImages + ' of ' + targetPins + ' pins...', Math.min(progress, 1));
 
         // Check if we have all pins with images
         if (withImages >= targetPins) {
-          // We have enough! Do one final pass to make sure
           await sleep(500);
-          collectPins();
+          collectPinsFromDoc();
           finalize();
           return;
         }
@@ -365,10 +606,9 @@
         if (withImages === lastCount) {
           sameCount++;
           if (sameCount > 12) {
-            // Stuck - try scrolling back up and down once more
             if (scrollAttempt < maxScrollAttempts - 50) {
-              stat('Re-scanning...', progress);
-              scrollTo(0, 0);
+              stat('Re-scanning ' + label + '...', progress);
+              win.scrollTo(0, 0);
               await sleep(1000);
               sameCount = 0;
             } else {
@@ -382,25 +622,23 @@
         }
 
         // Scroll down slowly
-        window.scrollBy(0, innerHeight * 0.4);
+        win.scrollBy(0, win.innerHeight * 0.4);
         await sleep(800);
 
         // Trigger scroll events
-        window.dispatchEvent(new Event('scroll'));
-        window.dispatchEvent(new Event('scrollend'));
+        win.dispatchEvent(new Event('scroll'));
+        win.dispatchEvent(new Event('scrollend'));
         await sleep(400);
 
         // At bottom of page?
-        if ((innerHeight + scrollY) >= (document.body.offsetHeight - 300)) {
-          // Wait for more content
+        if ((win.innerHeight + win.scrollY) >= (doc.body.offsetHeight - 300)) {
           await sleep(1500);
-          collectPins();
+          collectPinsFromDoc();
 
           var newWithImages = 0;
-          pinData.forEach(function(url) { if (url) newWithImages++; });
+          localPinData.forEach(function(url) { if (url) newWithImages++; });
 
           if (newWithImages === withImages && sameCount > 5) {
-            // Nothing new, we're done
             finalize();
             return;
           }
@@ -410,22 +648,10 @@
       }
 
       function finalize() {
-        // Final collection
-        collectPins();
+        collectPinsFromDoc();
 
-        // For pins without images, try one more time
-        var missingImages = [];
-        pinData.forEach(function(url, pinId) {
-          if (!url) missingImages.push(pinId);
-        });
-
-        if (missingImages.length > 0) {
-          stat('Looking for ' + missingImages.length + ' missing images...', 0.9);
-        }
-
-        // Collect all image URLs
         var urls = [];
-        pinData.forEach(function(url) {
+        localPinData.forEach(function(url) {
           if (url) urls.push(url);
         });
 
@@ -433,17 +659,79 @@
       }
 
       // Start at top
-      scrollTo(0, 0);
+      win.scrollTo(0, 0);
       await sleep(1000);
 
       // Initial scan
-      collectPins();
+      collectPinsFromDoc();
       var initial = 0;
-      pinData.forEach(function(url) { if (url) initial++; });
-      stat('Initial: ' + initial + ' pins, ' + pinData.size + ' IDs found. Scrolling...', 0);
+      localPinData.forEach(function(url) { if (url) initial++; });
+      stat(label + ' initial: ' + initial + ' pins found. Scrolling...', 0);
       await sleep(500);
 
       step();
+    });
+  }
+
+  // Collect pins from a section by opening it in a new tab
+  async function collectFromSectionTab(sectionUrl, sectionName) {
+    return new Promise(async function(resolve) {
+      stat('Opening section "' + sectionName + '" in new tab...', 0);
+
+      // Open section in new window/tab
+      var sectionWin = window.open(sectionUrl, '_blank');
+
+      if (!sectionWin) {
+        msg('<b>Popup blocked!</b> Please allow popups for Pinterest and try again.');
+        resolve([]);
+        return;
+      }
+
+      // Wait for page to load
+      stat('Waiting for "' + sectionName + '" to load...', 0);
+      await sleep(4000);
+
+      // Check if window is still open and accessible
+      try {
+        // Try to access the document to verify same-origin access
+        var testAccess = sectionWin.document.body;
+        if (!testAccess) throw new Error('No access');
+      } catch (e) {
+        msg('<b>Cannot access section tab.</b> It may have been blocked or closed.');
+        try { sectionWin.close(); } catch (e2) {}
+        resolve([]);
+        return;
+      }
+
+      // Get pin count for this section if available
+      var sectionPinCount = 100;
+      try {
+        var pc = sectionWin.document.querySelector('[data-test-id="pin-count"]');
+        if (pc) {
+          var m = pc.textContent.match(/[\d,]+/);
+          if (m) sectionPinCount = parseInt(m[0].replace(/,/g, ''), 10);
+        }
+      } catch (e) {}
+
+      // Temporarily update totalPins for the collection
+      var savedTotalPins = totalPins;
+      totalPins = sectionPinCount;
+
+      // Collect pins from the section window
+      var urls = await scrollAndCollect(sectionName, sectionWin);
+
+      // Restore totalPins
+      totalPins = savedTotalPins;
+
+      // Close the section window
+      try {
+        sectionWin.close();
+      } catch (e) {}
+
+      stat('Collected ' + urls.length + ' pins from "' + sectionName + '"', 1);
+      await sleep(500);
+
+      resolve(urls);
     });
   }
 
@@ -465,41 +753,104 @@
     }
   }
 
-  async function startDownload(startPct, endPct) {
+  async function startDownload(startPct, endPct, selectedSections) {
     isDownloading = true;
     dis(true);
 
-    try {
-      var allUrls = await scrollAndCollect();
-      var startIdx = Math.floor(allUrls.length * startPct);
-      var endIdx = Math.floor(allUrls.length * endPct);
-      var urls = allUrls.slice(startIdx, endIdx);
+    // selectedSections is an array of section objects from the UI checkboxes
+    var sections = selectedSections || [];
 
-      stat('Downloading ' + urls.length + ' images...', 0);
+    try {
+      var safeName = boardName.replace(/[^a-zA-Z0-9]/g, '_');
+      var allCollected = []; // Array of {section: string|null, urls: string[]}
+
+      // Collect pins from current page (main board or current section)
+      stat('Collecting pins from current page...', 0);
+      var mainUrls = await scrollAndCollect(currentSection);
+      var startIdx = Math.floor(mainUrls.length * startPct);
+      var endIdx = Math.floor(mainUrls.length * endPct);
+      var slicedUrls = mainUrls.slice(startIdx, endIdx);
+
+      allCollected.push({
+        section: currentSection, // null if main board
+        urls: slicedUrls
+      });
+
+      // If we have selected sections and we're on the main board, collect from each section using new tabs
+      if (sections.length > 0 && !currentSection) {
+        msg('<b>Collecting from ' + sections.length + ' sections.</b> Opening each in a new tab...<br><i>Please allow popups if prompted.</i>');
+        await sleep(1000);
+
+        for (var si = 0; si < sections.length; si++) {
+          var section = sections[si];
+          stat('Section ' + (si + 1) + '/' + sections.length + ': ' + section.name, 0);
+
+          // Open section in new tab and collect pins
+          var sectionUrls = await collectFromSectionTab(
+            'https://www.pinterest.com' + section.url,
+            section.name
+          );
+
+          if (sectionUrls.length > 0) {
+            var sectionStartIdx = Math.floor(sectionUrls.length * startPct);
+            var sectionEndIdx = Math.floor(sectionUrls.length * endPct);
+            var slicedSectionUrls = sectionUrls.slice(sectionStartIdx, sectionEndIdx);
+
+            allCollected.push({
+              section: section.name,
+              urls: slicedSectionUrls
+            });
+          }
+
+          // Small delay between sections
+          if (si < sections.length - 1) {
+            await sleep(1000);
+          }
+        }
+      }
+
+      // Count total pins to download
+      var totalToDownload = 0;
+      allCollected.forEach(function(c) { totalToDownload += c.urls.length; });
+
+      stat('Downloading ' + totalToDownload + ' images...', 0);
       msg('<b>Fetching images...</b> This may take a moment.');
 
       var files = [];
       var success = 0, failed = 0;
-      var safeName = boardName.replace(/[^a-zA-Z0-9]/g, '_');
+      var globalIndex = 0;
 
-      for (var i = 0; i < urls.length; i++) {
-        var filename = safeName + '_' + String(i + 1).padStart(4, '0') + '.jpg';
-        stat('Fetching ' + (i + 1) + ' of ' + urls.length + '...', (i + 1) / urls.length);
+      for (var ci = 0; ci < allCollected.length; ci++) {
+        var collection = allCollected[ci];
+        var folderPath = safeName + '/'; // All files go inside main board folder
 
-        var data = await fetchImage(urls[i]);
-        if (data) {
-          files.push({
-            name: filename,
-            data: data,
-            crc: crc32(new Uint8Array(data))
-          });
-          success++;
-        } else {
-          failed++;
+        // Build folder path - sections go in subfolders
+        if (collection.section) {
+          // This is a section - put in subfolder within main folder
+          var safeSectionName = collection.section.replace(/[^a-zA-Z0-9]/g, '_');
+          folderPath = safeName + '/' + safeSectionName + '/';
         }
 
-        // Small delay to avoid overwhelming the server
-        if (i % 5 === 0) await sleep(50);
+        for (var ui = 0; ui < collection.urls.length; ui++) {
+          globalIndex++;
+          var filename = folderPath + String(ui + 1).padStart(4, '0') + '.jpg';
+          stat('Fetching ' + globalIndex + ' of ' + totalToDownload + '...', globalIndex / totalToDownload);
+
+          var data = await fetchImage(collection.urls[ui]);
+          if (data) {
+            files.push({
+              name: filename,
+              data: data,
+              crc: crc32(new Uint8Array(data))
+            });
+            success++;
+          } else {
+            failed++;
+          }
+
+          // Small delay to avoid overwhelming the server
+          if (globalIndex % 5 === 0) await sleep(50);
+        }
       }
 
       stat('Creating zip file...', 1);
@@ -507,17 +858,28 @@
 
       var zipData = createZip(files);
       var blob = new Blob([zipData], { type: 'application/zip' });
-      var url = URL.createObjectURL(blob);
+      var downloadUrl = URL.createObjectURL(blob);
       var a = document.createElement('a');
-      a.href = url;
+      a.href = downloadUrl;
       a.download = safeName + '_pins.zip';
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      URL.revokeObjectURL(downloadUrl);
 
-      stat('Done! ' + success + ' images in zip' + (failed > 0 ? ' (' + failed + ' failed)' : ''), 1);
-      msg('<b>Complete!</b> Check your Downloads folder for <code>' + safeName + '_pins.zip</code>');
+      // Build summary
+      var summary = success + ' images in zip';
+      if (failed > 0) summary += ' (' + failed + ' failed)';
+      if (allCollected.length > 1) {
+        summary += '<br>Sections: ';
+        allCollected.forEach(function(c, idx) {
+          if (idx > 0) summary += ', ';
+          summary += (c.section || 'main') + ' (' + c.urls.length + ')';
+        });
+      }
+
+      stat('Done! ' + success + ' images downloaded', 1);
+      msg('<b>Complete!</b> Check your Downloads folder for <code>' + safeName + '_pins.zip</code><br>' + summary);
 
     } catch (err) {
       stat('Error: ' + err.message, 0);
