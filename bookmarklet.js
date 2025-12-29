@@ -12,7 +12,8 @@
   var currentSection = null; // null = main board, otherwise section name
 
   var s = document.createElement('style');
-  s.textContent = '#pa-overlay{position:fixed;top:20px;right:20px;width:340px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.2);z-index:999999;font-family:system-ui,sans-serif;color:#333;max-height:90vh;overflow:auto}#pa-overlay *{box-sizing:border-box}.pa-h{padding:16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}.pa-h h2{margin:0;font-size:16px}.pa-x{background:none;border:none;font-size:20px;cursor:pointer;color:#666}.pa-c{padding:16px}.pa-i{margin-bottom:16px}.pa-n{font-size:18px;font-weight:600;margin-bottom:4px}.pa-p{font-size:14px;color:#666}.pa-t{font-size:12px;color:#888;margin:12px 0 8px;text-transform:uppercase}.pa-b{display:block;width:100%;padding:12px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;background:#fff;font-size:14px;cursor:pointer}.pa-b:hover{background:#f5f5f5}.pa-b:disabled{opacity:.5}.pa-bp{background:#e60023;color:#fff;border-color:#e60023}.pa-bp:hover{background:#ad081b}.pa-r{display:flex;gap:8px}.pa-r .pa-b{flex:1;margin:0}.pa-s{padding:12px;background:#f8f8f8;border-radius:8px;font-size:13px;color:#666;margin-top:12px;display:none}.pa-s.on{display:block}.pa-g{height:4px;background:#eee;border-radius:2px;margin-top:8px}.pa-gb{height:100%;background:#e60023;width:0;transition:width .3s}.pa-m{background:#fff3cd;padding:10px;border-radius:8px;font-size:12px;margin-top:12px;display:none}.pa-m.on{display:block}';
+  s.id = 'pa-styles';
+  s.textContent = '#pa-overlay{position:fixed;top:20px;right:20px;width:340px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.2);z-index:999999;font-family:system-ui,sans-serif;color:#333;max-height:90vh;overflow:auto}#pa-overlay *{box-sizing:border-box}.pa-h{padding:16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}.pa-h h2{margin:0;font-size:16px}.pa-x{background:none;border:none;font-size:20px;cursor:pointer;color:#666}.pa-c{padding:16px}.pa-i{margin-bottom:16px}.pa-n{font-size:18px;font-weight:600;margin-bottom:4px}.pa-p{font-size:14px;color:#666}.pa-t{font-size:12px;color:#888;margin:12px 0 8px;text-transform:uppercase}.pa-b{display:block;width:100%;padding:12px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;background:#fff;font-size:14px;cursor:pointer}.pa-b:hover{background:#f5f5f5}.pa-b:disabled{opacity:.5}.pa-bp{background:#e60023;color:#fff;border-color:#e60023}.pa-bp:hover{background:#ad081b}.pa-r{display:flex;gap:8px}.pa-r .pa-b{flex:1;margin:0}.pa-s{padding:12px;background:#f8f8f8;border-radius:8px;font-size:13px;color:#666;margin-top:12px;display:none}.pa-s.on{display:block}.pa-g{height:4px;background:#eee;border-radius:2px;margin-top:8px}.pa-gb{height:100%;background:#e60023;width:0;transition:width .3s}.pa-m{background:#fff3cd;padding:10px;border-radius:8px;font-size:12px;margin-top:12px;display:none}.pa-m.on{display:block}@keyframes pa-spin{to{transform:rotate(360deg)}}';
   document.head.appendChild(s);
 
   // Minimal ZIP file builder (uncompressed/store method)
@@ -168,105 +169,184 @@
     var username = pathParts[0];
     var boardSlug = pathParts[1];
     var boardPath = '/' + username + '/' + boardSlug;
-    var sectionSet = new Set();
+    var sectionMap = new Map(); // slug -> {name, pinCount}
+    var systemRoutes = ['pins', 'more_ideas', 'followers', 'activity', 'settings', 'edit', 'invite', 'organize', 'organise', 'collaborators', 'invites', 'see', 'see-pins', 'see_pins', 'ideas', 'search', 'notifications', 'messages', 'create', 'board', 'pin', 'user', 'about', 'terms', 'privacy', 'help', 'contact'];
 
-    // Strategy 1: Look for section links in the page
+    console.log('[PA] Detecting sections for:', boardPath);
+
+    // Strategy 1: Parse ALL script tags for BoardSection data (most reliable)
+    try {
+      var scripts = document.querySelectorAll('script');
+      scripts.forEach(function(script) {
+        var text = script.textContent || '';
+        if (text.length < 100) return;
+
+        // Look specifically for BoardSection objects with __typename marker
+        // Pattern: objects with "slug" and "__typename":"BoardSection"
+        var sectionPattern = /"slug"\s*:\s*"([^"]+)"[^}]*?"__typename"\s*:\s*"BoardSection"/g;
+        var match;
+        while ((match = sectionPattern.exec(text)) !== null) {
+          var slug = match[1];
+          if (!slug || systemRoutes.indexOf(slug) !== -1) continue;
+          if (slug.match(/^[\d]+$/) || slug.length > 100) continue;
+
+          // Get surrounding context to find pin_count and title
+          var start = Math.max(0, match.index - 300);
+          var end = Math.min(text.length, match.index + 500);
+          var context = text.slice(start, end);
+
+          var pinCount = 0;
+          var pinCountMatch = context.match(/"pin_count"\s*:\s*(\d+)/);
+          if (pinCountMatch) pinCount = parseInt(pinCountMatch[1], 10);
+
+          var name = decodeURIComponent(slug).replace(/-/g, ' ');
+          var titleMatch = context.match(/"title"\s*:\s*"([^"]+)"/);
+          if (titleMatch) name = titleMatch[1];
+
+          if (!sectionMap.has(slug)) {
+            sectionMap.set(slug, { name: name, pinCount: pinCount });
+            console.log('[PA] Found BoardSection:', name, '(' + slug + ')', pinCount, 'pins');
+          }
+        }
+
+        // Also try reverse pattern: __typename before slug
+        var reversePattern = /"__typename"\s*:\s*"BoardSection"[^}]*?"slug"\s*:\s*"([^"]+)"/g;
+        while ((match = reversePattern.exec(text)) !== null) {
+          var slug = match[1];
+          if (!slug || systemRoutes.indexOf(slug) !== -1) continue;
+          if (slug.match(/^[\d]+$/) || slug.length > 100) continue;
+
+          if (!sectionMap.has(slug)) {
+            var start = Math.max(0, match.index - 300);
+            var end = Math.min(text.length, match.index + 500);
+            var context = text.slice(start, end);
+
+            var pinCount = 0;
+            var pinCountMatch = context.match(/"pin_count"\s*:\s*(\d+)/);
+            if (pinCountMatch) pinCount = parseInt(pinCountMatch[1], 10);
+
+            var name = decodeURIComponent(slug).replace(/-/g, ' ');
+            var titleMatch = context.match(/"title"\s*:\s*"([^"]+)"/);
+            if (titleMatch) name = titleMatch[1];
+
+            sectionMap.set(slug, { name: name, pinCount: pinCount });
+            console.log('[PA] Found BoardSection (reverse):', name, '(' + slug + ')', pinCount, 'pins');
+          }
+        }
+
+        // Also look for board_sections or sections arrays
+        if (text.indexOf('board_sections') !== -1 || text.indexOf('"sections"') !== -1) {
+          var arrayPattern = /"slug"\s*:\s*"([^"]+)"[^}]*?"pin_count"\s*:\s*(\d+)/g;
+          while ((match = arrayPattern.exec(text)) !== null) {
+            var slug = match[1];
+            var pinCount = parseInt(match[2], 10);
+            if (!slug || systemRoutes.indexOf(slug) !== -1) continue;
+            if (slug.match(/^[\d]+$/) || slug.length > 100) continue;
+            // Only add if we found it near sections context
+            var nearbyStart = Math.max(0, match.index - 1000);
+            var nearbyText = text.slice(nearbyStart, match.index);
+            if (nearbyText.indexOf('section') !== -1 || nearbyText.indexOf('Section') !== -1) {
+              if (!sectionMap.has(slug)) {
+                var name = decodeURIComponent(slug).replace(/-/g, ' ');
+                sectionMap.set(slug, { name: name, pinCount: pinCount });
+                console.log('[PA] Found section in array:', name, '(' + slug + ')', pinCount, 'pins');
+              }
+            }
+          }
+        }
+      });
+    } catch (e) {
+      console.log('[PA] Script parsing error:', e);
+    }
+
+    // Strategy 2: Look for section links in the DOM (only if they have pin counts nearby)
     var allLinks = document.querySelectorAll('a[href]');
     allLinks.forEach(function(link) {
       var href = link.getAttribute('href') || '';
       if (href.indexOf(boardPath + '/') === 0) {
         var remainder = href.slice(boardPath.length + 1).split('/')[0].split('?')[0];
-        if (remainder && remainder.length > 0) {
-          var systemRoutes = ['pins', 'more_ideas', 'followers', 'activity', 'settings', 'edit', 'invite', 'organize', 'collaborators'];
-          if (systemRoutes.indexOf(remainder) === -1 && !sectionSet.has(remainder)) {
-            sectionSet.add(remainder);
-            addSection(remainder, link, boardPath);
+        if (remainder && remainder.length > 2 && remainder.length < 80) {
+          if (systemRoutes.indexOf(remainder) === -1 && systemRoutes.indexOf(remainder.toLowerCase()) === -1 && !remainder.match(/^[\d]+$/)) {
+            // Must have a parent container with pin count to be a valid section
+            var container = link.closest('[data-test-id]') || link.parentElement?.parentElement?.parentElement;
+            if (container) {
+              var containerText = container.textContent || '';
+              var countMatch = containerText.match(/(\d+)\s*(?:pins?|Pins?)/i);
+
+              // Only add if we found a pin count (real sections show pin counts)
+              if (countMatch) {
+                var pinCount = parseInt(countMatch[1], 10);
+                var name = decodeURIComponent(remainder).replace(/-/g, ' ');
+
+                var heading = container.querySelector('h2, h3, h4, [role="heading"]');
+                if (heading) {
+                  var headingText = heading.textContent.trim().replace(/\d+\s*pins?/gi, '').trim();
+                  if (headingText && headingText.length > 0 && headingText.length < 60) {
+                    name = headingText;
+                  }
+                }
+
+                if (!sectionMap.has(remainder)) {
+                  sectionMap.set(remainder, { name: name, pinCount: pinCount });
+                  console.log('[PA] Found section from DOM:', name, '(' + remainder + ')', pinCount, 'pins');
+                }
+              }
+            }
           }
         }
       }
     });
 
-    // Strategy 2: Look for section containers with data attributes
+    // Strategy 3: Look for section containers with data attributes
     var sectionContainers = document.querySelectorAll('[data-test-id*="section"], [data-test-id*="board-section"]');
     sectionContainers.forEach(function(container) {
       var link = container.querySelector('a[href*="/' + boardSlug + '/"]');
       if (link) {
         var href = link.getAttribute('href') || '';
         var match = href.match(new RegExp(boardPath + '/([^/?]+)'));
-        if (match && !sectionSet.has(match[1])) {
-          sectionSet.add(match[1]);
-          addSection(match[1], container, boardPath);
-        }
-      }
-    });
+        if (match && match[1] && match[1].length > 2 && systemRoutes.indexOf(match[1]) === -1 && systemRoutes.indexOf(match[1].toLowerCase()) === -1) {
+          var slug = match[1];
+          var containerText = container.textContent || '';
+          var countMatch = containerText.match(/(\d+)\s*(?:pins?|Pins?)/i);
 
-    // Strategy 3: Look for elements that look like section headers/titles
-    var headings = document.querySelectorAll('h2, h3, [role="heading"]');
-    headings.forEach(function(heading) {
-      var parent = heading.closest('a[href*="/' + boardSlug + '/"]');
-      if (parent) {
-        var href = parent.getAttribute('href') || '';
-        var match = href.match(new RegExp(boardPath + '/([^/?]+)'));
-        if (match && !sectionSet.has(match[1])) {
-          sectionSet.add(match[1]);
-          addSection(match[1], parent, boardPath);
-        }
-      }
-    });
+          // Only add if we found a pin count
+          if (countMatch) {
+            var pinCount = parseInt(countMatch[1], 10);
+            var name = decodeURIComponent(slug).replace(/-/g, ' ');
 
-    // Strategy 4: Parse Pinterest's embedded data if available
-    try {
-      var scripts = document.querySelectorAll('script[type="application/json"], script[id*="__PWS"]');
-      scripts.forEach(function(script) {
-        var text = script.textContent || '';
-        // Look for section patterns in JSON
-        var sectionMatches = text.match(/"slug":"([^"]+)"[^}]*"type":"boardSection"/gi);
-        if (sectionMatches) {
-          sectionMatches.forEach(function(m) {
-            var slugMatch = m.match(/"slug":"([^"]+)"/);
-            if (slugMatch && !sectionSet.has(slugMatch[1])) {
-              sectionSet.add(slugMatch[1]);
-              addSection(slugMatch[1], null, boardPath);
+            var heading = container.querySelector('h2, h3, h4, [role="heading"]');
+            if (heading) {
+              var headingText = heading.textContent.trim().replace(/\d+\s*pins?/gi, '').trim();
+              if (headingText && headingText.length > 0 && headingText.length < 60) {
+                name = headingText;
+              }
             }
-          });
-        }
-      });
-    } catch (e) {}
 
-    function addSection(slug, element, basePath) {
-      var sectionName = decodeURIComponent(slug).replace(/-/g, ' ');
-      var pinCount = 0;
-
-      // Try to get better name from element
-      if (element) {
-        var nameEl = element.querySelector('h2, h3, [role="heading"]') || element;
-        var text = nameEl.textContent.trim();
-        // Clean up the text - remove pin counts, etc.
-        var cleanText = text.replace(/\d+\s*(pins?|Pins?)/gi, '').trim();
-        if (cleanText && cleanText.length > 0 && cleanText.length < 60) {
-          sectionName = cleanText;
-        }
-
-        // Try to find pin count
-        var countMatch = (element.textContent || '').match(/(\d+)\s*(pins?|Pins?)/i);
-        if (countMatch) {
-          pinCount = parseInt(countMatch[1], 10);
+            if (!sectionMap.has(slug) || sectionMap.get(slug).pinCount === 0) {
+              sectionMap.set(slug, { name: name, pinCount: pinCount });
+              console.log('[PA] Found section from container:', name, '(' + slug + ')', pinCount, 'pins');
+            }
+          }
         }
       }
+    });
 
+    // Convert map to array
+    sectionMap.forEach(function(data, slug) {
       boardSections.push({
-        name: sectionName,
+        name: data.name,
         slug: slug,
-        url: basePath + '/' + slug,
-        pinCount: pinCount
+        url: boardPath + '/' + slug,
+        pinCount: data.pinCount
       });
-    }
+    });
 
     // Sort sections alphabetically
     boardSections.sort(function(a, b) {
       return a.name.localeCompare(b.name);
     });
 
+    console.log('[PA] Total sections found:', boardSections.length, boardSections);
     return boardSections;
   }
 
@@ -274,19 +354,29 @@
   async function detectSectionsAsync() {
     // First, try to detect without scrolling
     detectSections();
-    if (boardSections.length > 0) return boardSections;
 
-    // Scroll down briefly to trigger lazy loading of sections
+    // Always scroll to try to load more sections
+    console.log('[PA] Scrolling to load sections...');
     var originalScroll = window.scrollY;
-    window.scrollTo(0, 500);
-    await sleep(500);
-    window.scrollTo(0, 1000);
-    await sleep(500);
+
+    // Scroll down progressively to trigger lazy loading
+    for (var pos = 0; pos <= 2500; pos += 400) {
+      window.scrollTo(0, pos);
+      await sleep(300);
+    }
+
+    // Wait a bit for content to load
+    await sleep(800);
+
+    // Scroll back up
     window.scrollTo(0, originalScroll);
     await sleep(300);
 
     // Try detection again
-    return detectSections();
+    detectSections();
+
+    console.log('[PA] After scrolling, found', boardSections.length, 'sections');
+    return boardSections;
   }
 
   function esc(x) {
@@ -311,8 +401,16 @@
 
     html += '<div class="pa-p">' + info.t.toLocaleString() + ' pins</div></div>';
 
-    // Sections panel placeholder
-    html += '<div id="pa-sections-panel"></div>';
+    // Sections panel with loading state
+    html += '<div id="pa-sections-panel">';
+    if (!info.section) {
+      html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
+      html += '<div style="font-weight:600;font-size:13px;margin-bottom:8px">Sections</div>';
+      html += '<div style="color:#888;font-size:12px;padding:8px 0;text-align:center">';
+      html += '<div style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#e60023;border-radius:50%;animation:pa-spin 1s linear infinite;margin-right:8px;vertical-align:middle"></div>';
+      html += 'Loading sections...</div></div>';
+    }
+    html += '</div>';
 
     html += '<div id="pa-btns"><button class="pa-b pa-bp" data-s="0" data-e="1">Download All</button>';
 
