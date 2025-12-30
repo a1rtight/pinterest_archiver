@@ -412,7 +412,7 @@
     }
     html += '</div>';
 
-    html += '<div id="pa-btns"><button class="pa-b pa-bp" data-s="0" data-e="1">Download All</button>';
+    html += '<div id="pa-btns"><button class="pa-b pa-bp" data-s="0" data-e="1">Download</button>';
 
     if (info.t > 200) {
       html += '<div class="pa-t">By Halves</div><div class="pa-r">';
@@ -432,7 +432,8 @@
 
     html += '</div><div class="pa-s" id="pa-s"><span id="pa-st">Starting...</span>';
     html += '<div class="pa-g"><div class="pa-gb" id="pa-gb"></div></div></div>';
-    html += '<div class="pa-m" id="pa-m"></div></div>';
+    html += '<div class="pa-m" id="pa-m"></div>';
+    html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #eee;font-size:13px;color:#666">Author: <a href="https://www.jbrandford.com" target="_blank" style="color:#e60023;text-decoration:none"><svg width="14" height="14" viewBox="0 0 14 14" style="vertical-align:-2px;margin-right:4px"><circle cx="7" cy="7" r="7" fill="#e60023"/></svg>J.Brandford</a></div></div>';
 
     overlay.innerHTML = html;
     document.body.appendChild(overlay);
@@ -452,14 +453,27 @@
       }
     }
 
-    // Get selected sections from checkboxes
+    // Get selected sections from checkboxes (includes "main" if checked)
     function getSelectedSections() {
       var selected = [];
       var checkboxes = document.querySelectorAll('.pa-section-cb:checked');
       checkboxes.forEach(function(cb) {
-        var idx = parseInt(cb.dataset.idx, 10);
-        if (boardSections[idx]) {
-          selected.push(boardSections[idx]);
+        if (cb.dataset.main === 'true') {
+          // This is the "main" checkbox - calculate main pin count
+          var sectionPinTotal = boardSections.reduce(function(sum, sec) { return sum + (sec.pinCount || 0); }, 0);
+          var mainPinCount = Math.max(0, totalPins - sectionPinTotal);
+          selected.push({
+            name: 'main',
+            slug: null,
+            url: null, // Will be constructed from current path
+            pinCount: mainPinCount,
+            isMain: true
+          });
+        } else {
+          var idx = parseInt(cb.dataset.idx, 10);
+          if (boardSections[idx]) {
+            selected.push(boardSections[idx]);
+          }
         }
       });
       return selected;
@@ -476,19 +490,22 @@
         return;
       }
 
-      var html = '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
-      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
-      html += '<span style="font-weight:600;font-size:13px">Sections</span>';
-      html += '<button id="pa-scan-sections" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer">Scan Again</button>';
-      html += '</div>';
+      // Calculate main pin count (total - sections)
+      var sectionPinTotal = sections.reduce(function(sum, sec) { return sum + (sec.pinCount || 0); }, 0);
+      var mainPinCount = Math.max(0, info.t - sectionPinTotal);
 
-      if (sections.length === 0) {
-        html += '<div style="color:#888;font-size:12px;padding:8px 0">No sections detected. Click "Scan Again" after scrolling down the page.</div>';
-      } else {
-        html += '<div style="margin-bottom:8px"><label style="display:flex;align-items:center;cursor:pointer;font-size:12px">';
+      var html = '';
+
+      // SECTIONS BLOCK
+      if (sections.length > 0) {
+        html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+        html += '<label style="display:flex;align-items:center;cursor:pointer;font-weight:600;font-size:13px">';
         html += '<input type="checkbox" id="pa-select-all-sections" checked style="margin-right:6px">';
-        html += '<span>Select all (' + sections.length + ' sections)</span></label></div>';
-        html += '<div style="max-height:150px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;background:#fff">';
+        html += '<span>Sections (' + sectionPinTotal + ' pins)</span></label>';
+        html += '<button id="pa-scan-sections" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer">Scan Again</button>';
+        html += '</div>';
+        html += '<div style="max-height:180px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;background:#fff">';
 
         sections.forEach(function(sec, idx) {
           html += '<label style="display:flex;align-items:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:12px">';
@@ -500,10 +517,23 @@
           html += '</label>';
         });
 
-        html += '</div>';
+        html += '</div></div>';
+      } else {
+        // No sections found - just show scan button
+        html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
+        html += '<div style="display:flex;justify-content:space-between;align-items:center">';
+        html += '<span style="font-weight:600;font-size:13px;color:#888">No sections found</span>';
+        html += '<button id="pa-scan-sections" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer">Scan Again</button>';
+        html += '</div></div>';
       }
 
+      // MAIN BOARD BLOCK
+      html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
+      html += '<label style="display:flex;align-items:center;cursor:pointer;font-weight:600;font-size:13px">';
+      html += '<input type="checkbox" class="pa-section-cb" data-main="true" checked style="margin-right:6px">';
+      html += '<span>Main board (' + mainPinCount + ' pins)</span></label>';
       html += '</div>';
+
       panel.innerHTML = html;
 
       // Bind scan button
@@ -517,25 +547,16 @@
         };
       }
 
-      // Bind select all checkbox
+      // Bind select all sections checkbox
       var selectAllCb = document.getElementById('pa-select-all-sections');
       if (selectAllCb) {
         selectAllCb.onchange = function() {
-          var checkboxes = document.querySelectorAll('.pa-section-cb');
-          checkboxes.forEach(function(cb) {
+          var sectionCheckboxes = document.querySelectorAll('.pa-section-cb[data-idx]');
+          sectionCheckboxes.forEach(function(cb) {
             cb.checked = selectAllCb.checked;
           });
         };
       }
-
-      // Update select all when individual checkboxes change
-      var sectionCbs = document.querySelectorAll('.pa-section-cb');
-      sectionCbs.forEach(function(cb) {
-        cb.onchange = function() {
-          var allChecked = document.querySelectorAll('.pa-section-cb:checked').length === sectionCbs.length;
-          if (selectAllCb) selectAllCb.checked = allChecked;
-        };
-      });
     }
 
     bindButtons();
@@ -851,48 +872,262 @@
     }
   }
 
+  // Load a section in an iframe and collect pins from it
+  // Returns {urls: string[], pinIds: Set} so we can track which pins are in sections
+  async function collectFromSectionIframeWithIds(sectionUrl, sectionName, expectedPinCount) {
+    return new Promise(async function(resolve) {
+      console.log('[PA] Loading section in iframe:', sectionName, sectionUrl);
+      stat('Loading "' + sectionName + '"...', 0);
+
+      // Create hidden iframe
+      var iframe = document.createElement('iframe');
+      iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;opacity:0;pointer-events:none;z-index:-1';
+      iframe.src = sectionUrl;
+      document.body.appendChild(iframe);
+
+      // Wait for iframe to load
+      var loaded = false;
+      iframe.onload = function() { loaded = true; };
+
+      // Wait for load event or timeout
+      var waitAttempts = 0;
+      while (!loaded && waitAttempts < 20) {
+        await sleep(500);
+        waitAttempts++;
+      }
+
+      if (!loaded) {
+        console.log('[PA] Iframe load timeout for:', sectionName);
+        iframe.remove();
+        resolve({ urls: [], pinIds: new Set() });
+        return;
+      }
+
+      // Wait extra for content to render
+      await sleep(2000);
+
+      // Try to access iframe content
+      var iframeDoc;
+      try {
+        iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      } catch (e) {
+        console.log('[PA] Cannot access iframe (cross-origin):', e);
+        iframe.remove();
+        resolve({ urls: [], pinIds: new Set() });
+        return;
+      }
+
+      // Collect pins from iframe by scrolling within it
+      var pinData = new Map(); // pinId -> url
+      var iframeWin = iframe.contentWindow;
+      var targetPins = expectedPinCount || 50;
+
+      stat('Scanning "' + sectionName + '"...', 0);
+
+      // Scroll and collect function for iframe
+      async function collectFromIframe() {
+        var pinLinks = iframeDoc.querySelectorAll('a[href*="/pin/"]');
+        pinLinks.forEach(function(link) {
+          var match = link.href.match(/\/pin\/(\d+)/);
+          if (!match) return;
+          var pinId = match[1];
+          if (pinData.has(pinId) && pinData.get(pinId)) return;
+
+          var container = link.closest('[data-test-id="pin"]') ||
+                          link.closest('[data-test-id="pinWrapper"]') ||
+                          link.closest('[data-grid-item="true"]') ||
+                          link.closest('[role="listitem"]') ||
+                          link.parentElement?.parentElement?.parentElement;
+
+          if (!container) return;
+
+          var img = container.querySelector('img[src*="pinimg.com"]');
+          if (img && isValidPinImage(img.src)) {
+            pinData.set(pinId, getOriginalUrl(img.src));
+          }
+        });
+      }
+
+      // Initial collection
+      collectFromIframe();
+
+      // Scroll within iframe to load more
+      var lastCount = 0;
+      var sameCount = 0;
+      for (var scroll = 0; scroll < 50; scroll++) {
+        iframeWin.scrollBy(0, iframeWin.innerHeight * 0.5);
+        await sleep(600);
+        collectFromIframe();
+
+        var currentCount = pinData.size;
+        stat('"' + sectionName + '": ' + currentCount + '/' + targetPins + ' pins', currentCount / targetPins);
+
+        if (currentCount >= targetPins) break;
+        if (currentCount === lastCount) {
+          sameCount++;
+          if (sameCount > 8) break;
+        } else {
+          sameCount = 0;
+          lastCount = currentCount;
+        }
+      }
+
+      // Extract URLs and pin IDs
+      var urls = [];
+      var pinIds = new Set();
+      pinData.forEach(function(url, pinId) {
+        if (url) {
+          urls.push(url);
+          pinIds.add(pinId);
+        }
+      });
+
+      console.log('[PA] Collected', urls.length, 'pins from section:', sectionName);
+
+      // Cleanup
+      iframe.remove();
+      resolve({ urls: urls, pinIds: pinIds });
+    });
+  }
+
+  // Collect main board pins (not in sections) using iframe
+  async function collectMainBoardPins(boardUrl, sectionPinIds, expectedTotal) {
+    return new Promise(async function(resolve) {
+      console.log('[PA] Loading main board in iframe:', boardUrl);
+      stat('Loading main board...', 0);
+
+      var iframe = document.createElement('iframe');
+      iframe.style.cssText = 'position:fixed;top:0;left:0;width:100vw;height:100vh;opacity:0;pointer-events:none;z-index:-1';
+      iframe.src = boardUrl;
+      document.body.appendChild(iframe);
+
+      var loaded = false;
+      iframe.onload = function() { loaded = true; };
+
+      var waitAttempts = 0;
+      while (!loaded && waitAttempts < 20) {
+        await sleep(500);
+        waitAttempts++;
+      }
+
+      if (!loaded) {
+        console.log('[PA] Iframe load timeout for main board');
+        iframe.remove();
+        resolve([]);
+        return;
+      }
+
+      await sleep(2000);
+
+      var iframeDoc;
+      try {
+        iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
+      } catch (e) {
+        console.log('[PA] Cannot access main board iframe:', e);
+        iframe.remove();
+        resolve([]);
+        return;
+      }
+
+      var pinData = new Map(); // pinId -> url
+      var iframeWin = iframe.contentWindow;
+      var targetPins = expectedTotal || 100;
+
+      stat('Scanning main board...', 0);
+
+      async function collectFromIframe() {
+        var pinLinks = iframeDoc.querySelectorAll('a[href*="/pin/"]');
+        pinLinks.forEach(function(link) {
+          var match = link.href.match(/\/pin\/(\d+)/);
+          if (!match) return;
+          var pinId = match[1];
+
+          // Skip if already in a section
+          if (sectionPinIds.has(pinId)) return;
+          if (pinData.has(pinId) && pinData.get(pinId)) return;
+
+          var container = link.closest('[data-test-id="pin"]') ||
+                          link.closest('[data-test-id="pinWrapper"]') ||
+                          link.closest('[data-grid-item="true"]') ||
+                          link.closest('[role="listitem"]') ||
+                          link.parentElement?.parentElement?.parentElement;
+
+          if (!container) return;
+
+          var img = container.querySelector('img[src*="pinimg.com"]');
+          if (img && isValidPinImage(img.src)) {
+            pinData.set(pinId, getOriginalUrl(img.src));
+          }
+        });
+      }
+
+      collectFromIframe();
+
+      var lastCount = 0;
+      var sameCount = 0;
+      for (var scroll = 0; scroll < 80; scroll++) {
+        iframeWin.scrollBy(0, iframeWin.innerHeight * 0.5);
+        await sleep(600);
+        collectFromIframe();
+
+        var currentCount = pinData.size;
+        stat('"main": ' + currentCount + ' pins (excluding sections)', currentCount / targetPins);
+
+        if (currentCount >= targetPins) break;
+        if (currentCount === lastCount) {
+          sameCount++;
+          if (sameCount > 10) break;
+        } else {
+          sameCount = 0;
+          lastCount = currentCount;
+        }
+      }
+
+      var urls = [];
+      pinData.forEach(function(url) { if (url) urls.push(url); });
+
+      console.log('[PA] Collected', urls.length, 'main board pins (excluding section pins)');
+
+      iframe.remove();
+      resolve(urls);
+    });
+  }
+
   async function startDownload(startPct, endPct, selectedSections) {
     isDownloading = true;
     dis(true);
 
-    // selectedSections is an array of section objects from the UI checkboxes
-    var sections = selectedSections || [];
+    var allSelected = selectedSections || [];
+
+    // Separate regular sections from "main"
+    var regularSections = allSelected.filter(function(s) { return !s.isMain; });
+    var includeMain = allSelected.some(function(s) { return s.isMain; });
+    var sectionPinIds = new Set(); // Track pin IDs from sections to exclude from main
 
     try {
       var safeName = boardName.replace(/[^a-zA-Z0-9]/g, '_');
-      var allCollected = []; // Array of {section: string|null, urls: string[]}
+      var allCollected = []; // Array of {section: string, urls: string[]}
 
-      // Collect pins from current page (main board or current section)
-      stat('Collecting pins from current page...', 0);
-      var mainUrls = await scrollAndCollect(currentSection);
-      var startIdx = Math.floor(mainUrls.length * startPct);
-      var endIdx = Math.floor(mainUrls.length * endPct);
-      var slicedUrls = mainUrls.slice(startIdx, endIdx);
+      // RULE 2: Handle sections FIRST - they are the problematic area
+      if (regularSections.length > 0) {
+        msg('<b>Collecting from ' + regularSections.length + ' section(s)...</b>');
 
-      allCollected.push({
-        section: currentSection, // null if main board
-        urls: slicedUrls
-      });
+        for (var si = 0; si < regularSections.length; si++) {
+          var section = regularSections[si];
+          var sectionUrl = 'https://www.pinterest.com' + section.url;
 
-      // If we have selected sections and we're on the main board, collect from each section using new tabs
-      if (sections.length > 0 && !currentSection) {
-        msg('<b>Collecting from ' + sections.length + ' sections.</b> Opening each in a new tab...<br><i>Please allow popups if prompted.</i>');
-        await sleep(1000);
+          stat('Section ' + (si + 1) + '/' + regularSections.length + ': ' + section.name, si / regularSections.length);
 
-        for (var si = 0; si < sections.length; si++) {
-          var section = sections[si];
-          stat('Section ' + (si + 1) + '/' + sections.length + ': ' + section.name, 0);
+          // RULE 3: Collect ONLY pins from this section (via iframe)
+          var sectionResult = await collectFromSectionIframeWithIds(sectionUrl, section.name, section.pinCount);
 
-          // Open section in new tab and collect pins
-          var sectionUrls = await collectFromSectionTab(
-            'https://www.pinterest.com' + section.url,
-            section.name
-          );
+          if (sectionResult.urls.length > 0) {
+            // Track these pin IDs so we exclude them from main
+            sectionResult.pinIds.forEach(function(id) { sectionPinIds.add(id); });
 
-          if (sectionUrls.length > 0) {
-            var sectionStartIdx = Math.floor(sectionUrls.length * startPct);
-            var sectionEndIdx = Math.floor(sectionUrls.length * endPct);
-            var slicedSectionUrls = sectionUrls.slice(sectionStartIdx, sectionEndIdx);
+            var sectionStartIdx = Math.floor(sectionResult.urls.length * startPct);
+            var sectionEndIdx = Math.floor(sectionResult.urls.length * endPct);
+            var slicedSectionUrls = sectionResult.urls.slice(sectionStartIdx, sectionEndIdx);
 
             allCollected.push({
               section: section.name,
@@ -900,19 +1135,49 @@
             });
           }
 
-          // Small delay between sections
-          if (si < sections.length - 1) {
-            await sleep(1000);
+          await sleep(300);
+        }
+      }
+
+      // Collect MAIN board pins only if "main" was selected
+      if (includeMain) {
+        var pathParts = location.pathname.split('/').filter(Boolean);
+        if (pathParts.length >= 2) {
+          var mainBoardUrl = 'https://www.pinterest.com/' + pathParts[0] + '/' + pathParts[1];
+
+          stat('Collecting main board pins...', 0);
+          msg('<b>Collecting main board pins...</b> (excluding section pins)');
+
+          var mainUrls = await collectMainBoardPins(mainBoardUrl, sectionPinIds, totalPins);
+
+          if (mainUrls.length > 0) {
+            var mainStartIdx = Math.floor(mainUrls.length * startPct);
+            var mainEndIdx = Math.floor(mainUrls.length * endPct);
+            var slicedMainUrls = mainUrls.slice(mainStartIdx, mainEndIdx);
+
+            allCollected.push({
+              section: 'main',
+              urls: slicedMainUrls
+            });
+
+            console.log('[PA] Added', slicedMainUrls.length, 'main board pins');
           }
         }
       }
 
       // Count total pins to download
-      var totalToDownload = 0;
-      allCollected.forEach(function(c) { totalToDownload += c.urls.length; });
+      var totalToDownload = allCollected.reduce(function(sum, c) { return sum + c.urls.length; }, 0);
+
+      if (totalToDownload === 0) {
+        stat('No pins found', 0);
+        msg('<b>No pins found.</b> The iframe method may be blocked. Try using the bookmarklet directly on each section page.');
+        isDownloading = false;
+        dis(false);
+        return;
+      }
 
       stat('Downloading ' + totalToDownload + ' images...', 0);
-      msg('<b>Fetching images...</b> This may take a moment.');
+      msg('<b>Fetching ' + totalToDownload + ' images...</b>');
 
       var files = [];
       var success = 0, failed = 0;
@@ -920,19 +1185,13 @@
 
       for (var ci = 0; ci < allCollected.length; ci++) {
         var collection = allCollected[ci];
-        var folderPath = safeName + '/'; // All files go inside main board folder
-
-        // Build folder path - sections go in subfolders
-        if (collection.section) {
-          // This is a section - put in subfolder within main folder
-          var safeSectionName = collection.section.replace(/[^a-zA-Z0-9]/g, '_');
-          folderPath = safeName + '/' + safeSectionName + '/';
-        }
+        var safeSectionName = collection.section.replace(/[^a-zA-Z0-9]/g, '_');
+        var folderPath = safeName + '/' + safeSectionName + '/';
 
         for (var ui = 0; ui < collection.urls.length; ui++) {
           globalIndex++;
           var filename = folderPath + String(ui + 1).padStart(4, '0') + '.jpg';
-          stat('Fetching ' + globalIndex + ' of ' + totalToDownload + '...', globalIndex / totalToDownload);
+          stat('Fetching ' + globalIndex + '/' + totalToDownload, globalIndex / totalToDownload);
 
           var data = await fetchImage(collection.urls[ui]);
           if (data) {
@@ -946,12 +1205,11 @@
             failed++;
           }
 
-          // Small delay to avoid overwhelming the server
           if (globalIndex % 5 === 0) await sleep(50);
         }
       }
 
-      stat('Creating zip file...', 1);
+      stat('Creating zip...', 1);
       await sleep(100);
 
       var zipData = createZip(files);
@@ -965,23 +1223,20 @@
       document.body.removeChild(a);
       URL.revokeObjectURL(downloadUrl);
 
-      // Build summary
-      var summary = success + ' images in zip';
+      var summary = success + ' images';
       if (failed > 0) summary += ' (' + failed + ' failed)';
-      if (allCollected.length > 1) {
-        summary += '<br>Sections: ';
-        allCollected.forEach(function(c, idx) {
-          if (idx > 0) summary += ', ';
-          summary += (c.section || 'main') + ' (' + c.urls.length + ')';
-        });
-      }
+      summary += '<br><b>Sections:</b> ';
+      allCollected.forEach(function(c, idx) {
+        if (idx > 0) summary += ', ';
+        summary += c.section + ' (' + c.urls.length + ')';
+      });
 
-      stat('Done! ' + success + ' images downloaded', 1);
-      msg('<b>Complete!</b> Check your Downloads folder for <code>' + safeName + '_pins.zip</code><br>' + summary);
+      stat('Done! ' + success + ' images', 1);
+      msg('<b>Complete!</b><br>' + summary);
 
     } catch (err) {
       stat('Error: ' + err.message, 0);
-      console.error(err);
+      console.error('[PA] Download error:', err);
     }
 
     isDownloading = false;

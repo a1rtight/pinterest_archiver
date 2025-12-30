@@ -1,5 +1,11 @@
 # Pinterest Archiver - System Documentation
 
+## Core Rules
+
+1. **One-click downloading** - The download solution should be one click, or if not possible, as simple as possible
+2. **Sections first** - Handle sections first as they are the problematic area
+3. **Section accuracy** - Each section should contain only the pins within that section of the board, no more, no less
+
 ## Overview
 
 A bookmarklet that downloads pin images from Pinterest boards into a ZIP file, with support for board sections.
@@ -58,16 +64,62 @@ Three strategies are used to find board sections:
   - Pattern: `/\d+x\d*/` → `/originals/`
 - `isValidPinImage()`: Filters out avatars and tiny thumbnails (75x75, 60x60, etc.)
 
-### Download Process (`startDownload()`)
+### Section Download Process (Current Implementation)
 
-1. Collects pins from current page (main board or section)
-2. If sections are selected and on main board, opens each section in new tab:
-   - `collectFromSectionTab()` opens section URL
-   - Waits for load, then runs `scrollAndCollect()` in that window
-   - Closes tab after collection
-3. Fetches each image via `fetch()` with fallback to 736x resolution
-4. Creates ZIP using custom `createZip()` function (uncompressed/store method)
-5. Triggers download via blob URL
+The section download uses a **hidden iframe approach** that keeps the script running while loading each section's content separately.
+
+#### `collectFromSectionIframe(sectionUrl, sectionName, expectedPinCount)`
+
+1. **Create hidden iframe** - Full viewport size, opacity 0, pointer-events none, z-index -1
+2. **Set iframe src** to the section URL (e.g., `https://www.pinterest.com/user/board/section-name`)
+3. **Wait for load** - Poll for `onload` event with 10 second timeout
+4. **Wait for render** - Additional 2 second delay for Pinterest's client-side rendering
+5. **Access iframe document** - `iframe.contentDocument` or `iframe.contentWindow.document`
+6. **Scroll and collect within iframe**:
+   - Query `a[href*="/pin/"]` links in iframe document
+   - Find parent container for each pin
+   - Extract image URL from `img[src*="pinimg.com"]`
+   - Scroll iframe window by 50% viewport height
+   - Repeat up to 50 scroll iterations or until pin count reached
+   - Stop early if no new pins found for 8 consecutive scrolls
+7. **Cleanup** - Remove iframe from DOM
+8. **Return** array of image URLs
+
+#### `startDownload(startPct, endPct, selectedSections)`
+
+1. **Sections first** (Rule 2) - Loop through selected sections before anything else
+2. For each section:
+   - Build full URL: `https://www.pinterest.com` + section.url
+   - Call `collectFromSectionIframe()` with section URL, name, and expected pin count
+   - Apply percentage slicing if partial download requested
+   - Store results: `{section: name, urls: [...]}`
+3. **Fetch images** - Download each image URL via `fetch()` with fallback to 736x
+4. **Create ZIP** - Using custom uncompressed ZIP builder
+5. **Trigger download** - Via blob URL and programmatic click
+
+#### Why Iframe Works
+
+- **Same origin** - Pinterest sections are on same domain, so iframe content is accessible
+- **Script persistence** - Main page doesn't navigate, so our script keeps running
+- **Isolation** - Each iframe loads only that section's pins (Rule 3 - accuracy)
+- **No popups** - Doesn't trigger popup blockers like `window.open()` would
+
+#### Folder Structure in ZIP
+
+```
+BoardName/
+├── SectionOne/
+│   ├── 0001.jpg
+│   ├── 0002.jpg
+│   └── ...
+├── SectionTwo/
+│   ├── 0001.jpg
+│   └── ...
+└── SectionThree/
+    └── ...
+```
+
+Each section gets its own subfolder with sequentially numbered images.
 
 ### ZIP File Structure
 
