@@ -922,10 +922,21 @@
       var iframeWin = iframe.contentWindow;
       var targetPins = expectedPinCount || 50;
 
+      // Hide content to reduce browser load while scrolling (display:none for performance)
+      console.log('[PA] Using optimized scroll for', targetPins, 'pins');
+      var hiddenContainer = iframeDoc.querySelector('[data-test-id="pinGrid"]') ||
+                            iframeDoc.querySelector('[data-test-id="board-feed"]') ||
+                            iframeDoc.querySelector('main') ||
+                            iframeDoc.querySelector('[role="main"]');
+      if (hiddenContainer) {
+        hiddenContainer.style.display = 'none';
+      }
+
       stat('Scanning "' + sectionName + '"...', 0);
 
-      // Scroll and collect function for iframe
+      // Scroll and collect function for iframe - extracts URLs from script data
       async function collectFromIframe() {
+        // Method 1: Collect from DOM pin links
         var pinLinks = iframeDoc.querySelectorAll('a[href*="/pin/"]');
         pinLinks.forEach(function(link) {
           var match = link.href.match(/\/pin\/(\d+)/);
@@ -946,17 +957,51 @@
             pinData.set(pinId, getOriginalUrl(img.src));
           }
         });
+
+        // Method 2: Parse script tags for pin data (works even with display:none)
+        var scripts = iframeDoc.querySelectorAll('script');
+        scripts.forEach(function(script) {
+          var text = script.textContent || '';
+          if (text.length < 100 || text.indexOf('pinimg.com') === -1) return;
+
+          // Find pin IDs with their image URLs
+          var pinPattern = /"id"\s*:\s*"(\d+)"[^}]*?"images"[^}]*?"orig"[^}]*?"url"\s*:\s*"([^"]+pinimg[^"]+)"/g;
+          var match;
+          while ((match = pinPattern.exec(text)) !== null) {
+            var pinId = match[1];
+            var url = match[2].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+            if (!pinData.has(pinId) && isValidPinImage(url)) {
+              pinData.set(pinId, getOriginalUrl(url));
+            }
+          }
+
+          // Alternative pattern
+          var altPattern = /"pinId"\s*:\s*"?(\d+)"?[^}]*?"originUrl"\s*:\s*"([^"]+pinimg[^"]+)"/g;
+          while ((match = altPattern.exec(text)) !== null) {
+            var pinId = match[1];
+            var url = match[2].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+            if (!pinData.has(pinId) && isValidPinImage(url)) {
+              pinData.set(pinId, getOriginalUrl(url));
+            }
+          }
+        });
       }
 
       // Initial collection
       collectFromIframe();
 
+      // Fast scroll settings (content is hidden so no rendering overhead)
+      var scrollIncrement = iframeWin.innerHeight * 2;
+      var scrollDelay = 300;
+      var maxScrolls = 150;
+      var maxSameCount = 15;
+
       // Scroll within iframe to load more
       var lastCount = 0;
       var sameCount = 0;
-      for (var scroll = 0; scroll < 50; scroll++) {
-        iframeWin.scrollBy(0, iframeWin.innerHeight * 0.5);
-        await sleep(600);
+      for (var scroll = 0; scroll < maxScrolls; scroll++) {
+        iframeWin.scrollBy(0, scrollIncrement);
+        await sleep(scrollDelay);
         collectFromIframe();
 
         var currentCount = pinData.size;
@@ -965,11 +1010,16 @@
         if (currentCount >= targetPins) break;
         if (currentCount === lastCount) {
           sameCount++;
-          if (sameCount > 8) break;
+          if (sameCount > maxSameCount) break;
         } else {
           sameCount = 0;
           lastCount = currentCount;
         }
+      }
+
+      // Restore display
+      if (hiddenContainer) {
+        hiddenContainer.style.display = '';
       }
 
       // Extract URLs and pin IDs
@@ -1033,9 +1083,20 @@
       var iframeWin = iframe.contentWindow;
       var targetPins = expectedTotal || 100;
 
+      // Hide content to reduce browser load while scrolling (display:none for performance)
+      console.log('[PA] Using optimized scroll for main board,', targetPins, 'pins');
+      var hiddenContainer = iframeDoc.querySelector('[data-test-id="pinGrid"]') ||
+                            iframeDoc.querySelector('[data-test-id="board-feed"]') ||
+                            iframeDoc.querySelector('main') ||
+                            iframeDoc.querySelector('[role="main"]');
+      if (hiddenContainer) {
+        hiddenContainer.style.display = 'none';
+      }
+
       stat('Scanning main board...', 0);
 
       async function collectFromIframe() {
+        // Method 1: Collect from DOM pin links
         var pinLinks = iframeDoc.querySelectorAll('a[href*="/pin/"]');
         pinLinks.forEach(function(link) {
           var match = link.href.match(/\/pin\/(\d+)/);
@@ -1059,15 +1120,51 @@
             pinData.set(pinId, getOriginalUrl(img.src));
           }
         });
+
+        // Method 2: Parse script tags for pin data (works even with display:none)
+        var scripts = iframeDoc.querySelectorAll('script');
+        scripts.forEach(function(script) {
+          var text = script.textContent || '';
+          if (text.length < 100 || text.indexOf('pinimg.com') === -1) return;
+
+          // Find pin IDs with their image URLs
+          var pinPattern = /"id"\s*:\s*"(\d+)"[^}]*?"images"[^}]*?"orig"[^}]*?"url"\s*:\s*"([^"]+pinimg[^"]+)"/g;
+          var match;
+          while ((match = pinPattern.exec(text)) !== null) {
+            var pinId = match[1];
+            if (sectionPinIds.has(pinId)) continue; // Skip section pins
+            var url = match[2].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+            if (!pinData.has(pinId) && isValidPinImage(url)) {
+              pinData.set(pinId, getOriginalUrl(url));
+            }
+          }
+
+          // Alternative pattern
+          var altPattern = /"pinId"\s*:\s*"?(\d+)"?[^}]*?"originUrl"\s*:\s*"([^"]+pinimg[^"]+)"/g;
+          while ((match = altPattern.exec(text)) !== null) {
+            var pinId = match[1];
+            if (sectionPinIds.has(pinId)) continue; // Skip section pins
+            var url = match[2].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
+            if (!pinData.has(pinId) && isValidPinImage(url)) {
+              pinData.set(pinId, getOriginalUrl(url));
+            }
+          }
+        });
       }
 
       collectFromIframe();
 
+      // Fast scroll settings (content is hidden so no rendering overhead)
+      var scrollIncrement = iframeWin.innerHeight * 2;
+      var scrollDelay = 300;
+      var maxScrolls = 150;
+      var maxSameCount = 15;
+
       var lastCount = 0;
       var sameCount = 0;
-      for (var scroll = 0; scroll < 80; scroll++) {
-        iframeWin.scrollBy(0, iframeWin.innerHeight * 0.5);
-        await sleep(600);
+      for (var scroll = 0; scroll < maxScrolls; scroll++) {
+        iframeWin.scrollBy(0, scrollIncrement);
+        await sleep(scrollDelay);
         collectFromIframe();
 
         var currentCount = pinData.size;
@@ -1076,11 +1173,16 @@
         if (currentCount >= targetPins) break;
         if (currentCount === lastCount) {
           sameCount++;
-          if (sameCount > 10) break;
+          if (sameCount > maxSameCount) break;
         } else {
           sameCount = 0;
           lastCount = currentCount;
         }
+      }
+
+      // Restore display
+      if (hiddenContainer) {
+        hiddenContainer.style.display = '';
       }
 
       var urls = [];
@@ -1156,7 +1258,7 @@
             var slicedMainUrls = mainUrls.slice(mainStartIdx, mainEndIdx);
 
             allCollected.push({
-              section: 'main',
+              section: 'Main',
               urls: slicedMainUrls
             });
 
@@ -1183,10 +1285,20 @@
       var success = 0, failed = 0;
       var globalIndex = 0;
 
+      // Check if we're only downloading main board (no sections)
+      var mainOnly = allCollected.length === 1 && allCollected[0].section === 'Main';
+
       for (var ci = 0; ci < allCollected.length; ci++) {
         var collection = allCollected[ci];
-        var safeSectionName = collection.section.replace(/[^a-zA-Z0-9]/g, '_');
-        var folderPath = safeName + '/' + safeSectionName + '/';
+        var folderPath;
+        if (mainOnly) {
+          // No sections - save directly to board folder
+          folderPath = safeName + '/';
+        } else {
+          // Has sections - use subfolder
+          var safeSectionName = collection.section.replace(/[^a-zA-Z0-9]/g, '_');
+          folderPath = safeName + '/' + safeSectionName + '/';
+        }
 
         for (var ui = 0; ui < collection.urls.length; ui++) {
           globalIndex++;
