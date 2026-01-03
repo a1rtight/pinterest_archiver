@@ -558,46 +558,56 @@
     return found;
   }
 
-  // Download in synchronized batches - preserves order because Promise.all returns in input order
+  // Continuous parallel workers - grab pins IMMEDIATELY, don't wait for batches
+  // Order preserved via fileNum (assigned at queue time) + final sort before ZIP
+  // Duplicates prevented by downloadedPinIds (checked before queuing)
   var isScrolling = false;
+  var workersRunning = 0;
 
-  async function downloadBatches() {
+  async function downloadWorker() {
+    workersRunning++;
     while (isPlaying && !isPaused) {
-      // Wait for pins to be available
       if (pinQueue.length === 0) {
-        if (!isScrolling) break; // Done scrolling and queue empty
-        await sleep(50);
+        if (!isScrolling) break;
+        await sleep(10); // Fast polling when queue empty
         continue;
       }
 
-      // Grab a batch (up to MAX_PARALLEL)
-      var batch = pinQueue.splice(0, MAX_PARALLEL);
-      activeDownloads = batch.length;
+      var item = pinQueue.shift();
+      if (!item) continue;
+
+      activeDownloads++;
       updateLiveStats();
 
-      // Download all in parallel - Promise.all preserves order!
-      var results = await Promise.all(batch.map(async function(item) {
-        var data = await fetchImage(item.url);
-        return { item: item, data: data };
-      }));
+      var data = await fetchImage(item.url);
+      if (data) {
+        downloadedFiles.push({
+          name: safeName + '/' + String(item.fileNum).padStart(5, '0') + '.jpg',
+          data: data,
+          crc: crc32(new Uint8Array(data))
+        });
+      }
 
-      // Add results IN ORDER (Promise.all guarantees order matches input)
-      results.forEach(function(r) {
-        if (r.data) {
-          downloadedFiles.push({
-            name: safeName + '/' + String(r.item.fileNum).padStart(5, '0') + '.jpg',
-            data: r.data,
-            crc: crc32(new Uint8Array(r.data))
-          });
-        }
-        // Mark element as downloaded
-        if (r.item.element) {
-          r.item.element.dataset.paDownloaded = 'true';
-          r.item.element.style.opacity = '0.3';
-        }
-      });
+      if (item.element) {
+        item.element.dataset.paDownloaded = 'true';
+        item.element.style.opacity = '0.3';
+      }
 
-      activeDownloads = 0;
+      activeDownloads--;
+      updateLiveStats();
+    }
+    workersRunning--;
+  }
+
+  function startWorkers() {
+    for (var i = 0; i < MAX_PARALLEL; i++) {
+      downloadWorker(); // Fire and forget - runs in parallel
+    }
+  }
+
+  async function waitForWorkers() {
+    while (workersRunning > 0 || pinQueue.length > 0) {
+      await sleep(50);
       updateLiveStats();
     }
   }
@@ -736,14 +746,16 @@
       window.scrollTo(0, 0);
       await sleep(500);
 
-      // Start scroll loop and batch downloader in parallel
+      // Start workers IMMEDIATELY - they'll grab pins as soon as they're queued
       isScrolling = true;
-      var scrollPromise = scrollLoop().then(function() { isScrolling = false; });
-      var downloadPromise = downloadBatches();
+      startWorkers();
 
-      // Wait for both to complete
-      await scrollPromise;
-      await downloadPromise;
+      // Run scroll loop (workers download in parallel)
+      await scrollLoop();
+      isScrolling = false;
+
+      // Wait for remaining downloads to finish
+      await waitForWorkers();
 
       // FINAL SWEEP: Multiple passes to catch ALL lazy-loaded board pins
       // Pinterest lazy-loads images - need to scroll multiple times to trigger all loading
@@ -771,38 +783,26 @@
         var scrollStep = window.innerHeight * 0.8;
         var scrollPos = 0;
 
+        // Start workers for final sweep
+        isScrolling = true;
+        startWorkers();
+
         // Scroll through entire page slowly to catch everything
         while (scrollPos < pageHeight && !isPaused && !reachedRecommendations) {
-          // Stop if we hit the cap
           if (expectedPinCount > 0 && downloadedPinIds.size >= maxPins) break;
 
           window.scrollTo(0, scrollPos);
-          await sleep(400); // Longer wait for images to load
+          await sleep(300);
 
           var found = scanForNewPins();
           foundInPass += found;
-
-          // Download any queued pins immediately
-          while (pinQueue.length > 0 && !isPaused) {
-            var batch = pinQueue.splice(0, MAX_PARALLEL);
-            var results = await Promise.all(batch.map(async function(item) {
-              var data = await fetchImage(item.url);
-              return { item: item, data: data };
-            }));
-            results.forEach(function(r) {
-              if (r.data) {
-                downloadedFiles.push({
-                  name: safeName + '/' + String(r.item.fileNum).padStart(5, '0') + '.jpg',
-                  data: r.data,
-                  crc: crc32(new Uint8Array(r.data))
-                });
-              }
-            });
-            updateLiveStats();
-          }
+          updateLiveStats();
 
           scrollPos += scrollStep;
         }
+
+        isScrolling = false;
+        await waitForWorkers();
 
         stat('Pass ' + (pass + 1) + '/3: found ' + foundInPass + ' more board pins (skipped ' + skippedRecs + ' recs)', 0.95 + (pass * 0.015));
 
@@ -973,4 +973,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v10.0 HYBRID FILTERING: Pin count cap + recommendation section detection
+})(); // LATEST VERSION - v10.1 HYBRID FILTERING + FAST PARALLEL WORKERS
