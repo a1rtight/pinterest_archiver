@@ -46,15 +46,78 @@ if (downloadedPinIds.size >= expectedPinCount * 0.9) {
 ```
 
 #### `isInRecommendationSection(element)`
-Walks up the DOM checking previous siblings for recommendation markers:
+
+**Two-strategy detection:**
+
+**Strategy 1: Document-wide heading search (v12.0 - CRITICAL FOR OTHERS' BOARDS)**
+- Searches entire document for h1/h2/h3/h4 containing "more ideas", "find more", "picked for you", etc.
+- Uses `compareDocumentPosition()` to check if the pin element comes AFTER that heading in DOM order
+- Caches the heading per document to avoid repeated searches
+- **This works even when the heading is in a different DOM branch** (common on others' boards)
+
+```javascript
+var recHeading = findRecHeadingInDoc(doc);  // Find "Find more ideas" h1
+if (recHeading) {
+  var position = recHeading.compareDocumentPosition(element);
+  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+    return true;  // Pin is after the recommendation heading
+  }
+}
+```
+
+**Strategy 2: Previous sibling walk (original approach)**
+- Walks up the DOM checking previous siblings for recommendation markers
 - Text containing "more ideas", "more to explore", "picked for you", "inspired by", "you might like"
 - H1/H2/H3 headings with similar text
+
+**Why Strategy 1 was needed:**
+- On **your own boards**: Pinterest shows clear "More ideas" heading as a sibling of the pin grid
+- On **others' boards**: The heading (e.g., `<h1>Find more ideas</h1>`) is in a completely different DOM branch
+- The previous sibling walk never finds it because it's not a sibling at any ancestor level
+- `compareDocumentPosition()` works regardless of DOM structure
 
 #### Why This Works
 1. **Board pins come first** - Pinterest always shows board pins before recommendations
 2. **Buffer handles count inaccuracy** - 15% buffer accounts for Pinterest's sometimes-wrong counts
 3. **Early termination** - If recommendation heading found before cap, stops immediately
-4. **Applies to sections too** - Same logic works for both main board and section iframes 
+4. **Applies to sections too** - Same logic works for both main board and section iframes
+
+### Main Board Pin Counting (v11.0 - CRITICAL FIX)
+
+When downloading sections AND main board, the cap check must only count **main board pins**, not the total of all downloaded pins (which includes section pins).
+
+#### The Bug
+```
+Section pins downloaded: 191
+Main board expected: 110 (cap: 127 with 15% buffer)
+downloadedPinIds.size = 209 (includes section pins!)
+209 >= 127 → "Reached pin cap" immediately! ❌
+```
+
+#### The Fix
+Track `pinsBeforeMainBoard` and subtract it when checking the cap:
+
+```javascript
+// Set before main board download starts
+pinsBeforeMainBoard = downloadedPinIds.size;  // e.g., 191 section pins
+
+// In scanForNewPins() - count only MAIN BOARD pins against cap
+var mainBoardPinCount = downloadedPinIds.size - pinsBeforeMainBoard;
+if (expectedPinCount > 0 && mainBoardPinCount >= maxPins) {
+  return 0; // Stop collecting
+}
+```
+
+#### Result
+```
+mainBoardPinCount = 209 - 191 = 18 main board pins
+18 < 127 → Keep collecting! ✓
+```
+
+This ensures:
+1. Section pins don't count against main board cap
+2. Main board can collect its full allocation
+3. Each section and main board respects its own expected count 
 
 
 

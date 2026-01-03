@@ -437,33 +437,93 @@
   // 1. Primary: Hard cap based on expected pin count (with buffer)
   // 2. Secondary: Detect when we enter "More ideas" / recommendation section
   var expectedPinCount = 0;
-  var pinCountBuffer = 1.15; // Allow 15% buffer for Pinterest count inaccuracy
+  var pinCountBuffer = 1.15; // 15% buffer for Pinterest count inaccuracy (proven to work)
   var reachedRecommendations = false;
+  var pinsBeforeMainBoard = 0; // Track section pins so main board cap only counts main board pins
+
+  // Cache for section divider heading position (per document)
+  var recHeadingCache = new WeakMap();
+
+  function findSectionDividerInDoc(doc) {
+    // Check cache first
+    if (recHeadingCache.has(doc)) return recHeadingCache.get(doc);
+
+    // Find h1/h2 that acts as a divider between board pins and recommendations
+    // Key insight: the divider h1/h2 is NOT inside a pin container
+    // It appears as a standalone heading between the pin grid and recommendation grid
+    var headings = doc.querySelectorAll('h1, h2');
+
+    for (var i = 0; i < headings.length; i++) {
+      var heading = headings[i];
+
+      // Skip headings that are inside pin containers (these are pin titles, not dividers)
+      if (heading.closest('[data-test-id="pin"], [data-grid-item="true"]')) continue;
+
+      // Skip headings in navigation/header areas
+      if (heading.closest('header, nav, [role="navigation"]')) continue;
+
+      // This is a standalone h1/h2 - likely the section divider
+      // Check if there are pins both before AND after this heading
+      var pinsAfter = false;
+      var allPins = doc.querySelectorAll('a[href*="/pin/"]');
+      for (var j = 0; j < allPins.length; j++) {
+        var pin = allPins[j];
+        var position = heading.compareDocumentPosition(pin);
+        if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+          pinsAfter = true;
+          break;
+        }
+      }
+
+      if (pinsAfter) {
+        console.log('[PA] Found section divider h1/h2:', (heading.textContent || '').substring(0, 50));
+        recHeadingCache.set(doc, heading);
+        return heading;
+      }
+    }
+
+    recHeadingCache.set(doc, null);
+    return null;
+  }
 
   function isInRecommendationSection(element) {
-    // Check if this pin is after a "More ideas" heading or in a different section
-    // Walk up to find if there's a section divider before this element
-    var current = element;
-    var stepsUp = 0;
-    while (current && stepsUp < 10) {
-      // Check previous siblings for recommendation markers
-      var prev = current.previousElementSibling;
-      while (prev) {
-        var text = prev.textContent || '';
-        // Look for "More ideas", "More to explore", "Picked for you" etc
-        if (/more ideas|more to explore|picked for you|inspired by|you might like/i.test(text)) {
-          console.log('[PA] Found recommendation marker: ' + text.substring(0, 50));
+    var doc = element.ownerDocument || document;
+    var isIframe = doc !== document; // Are we in an iframe?
+
+    // STRATEGY 1: Structural detection - find h1/h2 divider (ONLY FOR IFRAMES)
+    // The divider h1/h2 is a standalone heading (not inside a pin) that has pins after it
+    // Any pin appearing after this divider in DOM order is a recommendation
+    if (isIframe) {
+      var divider = findSectionDividerInDoc(doc);
+      if (divider) {
+        var position = divider.compareDocumentPosition(element);
+        if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
+          console.log('[PA] Element is AFTER section divider');
           return true;
         }
-        // Also check for h1/h2/h3 headings that might indicate a new section
-        var heading = prev.querySelector('h1, h2, h3');
-        if (heading) {
-          var headingText = heading.textContent || '';
-          if (/more ideas|explore|for you|inspired/i.test(headingText)) {
-            console.log('[PA] Found recommendation heading: ' + headingText);
-            return true;
-          }
+      }
+    }
+
+    // STRATEGY 2: Walk up DOM checking previous siblings for h1/h2 (main document)
+    // Look for any h1/h2 that is a sibling (not text-based, structural only)
+    var current = element;
+    var stepsUp = 0;
+    while (current && stepsUp < 12) {
+      var prev = current.previousElementSibling;
+      while (prev) {
+        // Check if this sibling IS an h1/h2 (not inside a pin)
+        if (prev.matches('h1, h2') && !prev.closest('[data-test-id="pin"], [data-grid-item="true"]')) {
+          console.log('[PA] Found h1/h2 sibling divider:', (prev.textContent || '').substring(0, 40));
+          return true;
         }
+
+        // Check if this sibling CONTAINS an h1/h2 (not inside a pin)
+        var heading = prev.querySelector('h1, h2');
+        if (heading && !heading.closest('[data-test-id="pin"], [data-grid-item="true"]')) {
+          console.log('[PA] Found h1/h2 in sibling:', (heading.textContent || '').substring(0, 40));
+          return true;
+        }
+
         prev = prev.previousElementSibling;
       }
       current = current.parentElement;
@@ -494,11 +554,12 @@
   function scanForNewPins() {
     var found = 0;
 
-    // PRIMARY CHECK: Have we collected enough pins?
+    // PRIMARY CHECK: Have we collected enough MAIN BOARD pins?
+    // Subtract section pins (pinsBeforeMainBoard) to only count main board pins against cap
     var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
-    var currentCount = downloadedPinIds.size;
-    if (expectedPinCount > 0 && currentCount >= maxPins) {
-      console.log('[PA] Reached pin cap: ' + currentCount + '/' + maxPins);
+    var mainBoardPinCount = downloadedPinIds.size - pinsBeforeMainBoard;
+    if (expectedPinCount > 0 && mainBoardPinCount >= maxPins) {
+      console.log('[PA] Reached pin cap: ' + mainBoardPinCount + '/' + maxPins + ' main board pins');
       return 0; // Stop collecting
     }
 
@@ -508,15 +569,17 @@
       if (container.dataset.paQueued || container.dataset.paDownloaded || container.dataset.paSkipped) return;
       if (container.closest('header, nav')) return;
 
-      // Check cap again inside loop
-      if (expectedPinCount > 0 && downloadedPinIds.size >= maxPins) return;
+      // Check cap again inside loop (count only main board pins)
+      var mbCount = downloadedPinIds.size - pinsBeforeMainBoard;
+      if (expectedPinCount > 0 && mbCount >= maxPins) return;
 
       // SECONDARY CHECK: Are we in recommendations section?
-      if (!reachedRecommendations && downloadedPinIds.size >= expectedPinCount * 0.9) {
-        // Once we're close to expected count, start checking for recommendation markers
+      // For main board, use 90% threshold (sibling-walk method needs pins to be near heading)
+      // The 15% buffer cap is the primary protection for main board
+      if (!reachedRecommendations && mbCount >= Math.max(10, expectedPinCount * 0.9)) {
         if (isInRecommendationSection(container)) {
           reachedRecommendations = true;
-          console.log('[PA] Entered recommendations section at ' + downloadedPinIds.size + ' pins');
+          console.log('[PA] Entered recommendations section at ' + mbCount + '/' + expectedPinCount + ' main board pins');
         }
       }
       if (reachedRecommendations) {
@@ -692,6 +755,10 @@
       }
     });
 
+    console.warn('[PA] === DOWNLOAD CONFIG ===');
+    console.warn('[PA] downloadMainBoard:', downloadMainBoard);
+    console.warn('[PA] selectedSections:', selectedSections.length, selectedSections.map(function(s){return s.name + '(' + s.pinCount + ')';}).join(', '));
+    console.warn('[PA] totalPins:', totalPins);
     console.log('[PA] Using BOARD ID VERIFICATION to filter recommendations');
 
     // SECTIONS FIRST (Rule 2 from CLAUDE.md)
@@ -730,6 +797,8 @@
     }
 
     // Download main board if selected (after sections)
+    console.warn('[PA] === MAIN BOARD CHECK ===');
+    console.warn('[PA] downloadMainBoard=' + downloadMainBoard + ', isPaused=' + isPaused);
     if (downloadMainBoard && !isPaused) {
       stat('Downloading main board...', 0);
 
@@ -739,7 +808,15 @@
       reachedRecommendations = false;
       skippedRecs = 0;
 
-      console.log('[PA] Main board: expecting ~' + expectedPinCount + ' pins (total: ' + totalPins + ', sections: ' + sectionPinTotal + ')');
+      // CRITICAL: Track how many pins were downloaded BEFORE main board
+      // So we only count MAIN BOARD pins against the cap, not section pins
+      pinsBeforeMainBoard = downloadedPinIds.size;
+
+      console.warn('[PA] Main board: expecting ~' + expectedPinCount + ' pins (total: ' + totalPins + ' - sections: ' + sectionPinTotal + ')');
+      console.warn('[PA] Pins already downloaded (sections): ' + pinsBeforeMainBoard);
+      if (expectedPinCount === 0) {
+        console.warn('[PA] WARNING: expectedPinCount is 0! Section pins >= total pins. Will try to collect anyway.');
+      }
       console.log('[PA] Will cap at ' + Math.ceil(expectedPinCount * pinCountBuffer) + ' pins (with ' + Math.round((pinCountBuffer - 1) * 100) + '% buffer)');
 
       // Start from top of page
@@ -764,9 +841,10 @@
 
       var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
       for (var pass = 0; pass < 3 && !isPaused; pass++) {
-        // Stop if we've reached the cap or recommendations
-        if (reachedRecommendations || (expectedPinCount > 0 && downloadedPinIds.size >= maxPins)) {
-          console.log('[PA] Final sweep: already at limit, skipping pass ' + (pass + 1));
+        // Stop if we've reached the cap or recommendations (count only main board pins)
+        var mbPinCount = downloadedPinIds.size - pinsBeforeMainBoard;
+        if (reachedRecommendations || (expectedPinCount > 0 && mbPinCount >= maxPins)) {
+          console.log('[PA] Final sweep: already at limit (' + mbPinCount + '/' + maxPins + '), skipping pass ' + (pass + 1));
           break;
         }
 
@@ -789,7 +867,8 @@
 
         // Scroll through entire page slowly to catch everything
         while (scrollPos < pageHeight && !isPaused && !reachedRecommendations) {
-          if (expectedPinCount > 0 && downloadedPinIds.size >= maxPins) break;
+          var currentMbCount = downloadedPinIds.size - pinsBeforeMainBoard;
+          if (expectedPinCount > 0 && currentMbCount >= maxPins) break;
 
           window.scrollTo(0, scrollPos);
           await sleep(300);
@@ -899,17 +978,20 @@
 
       var pinData = new Map(), iframeWin = iframe.contentWindow;
       var target = sectionExpectedCount || 50;
-      var maxTarget = Math.ceil(target * pinCountBuffer);
+      // Use same 15% buffer as main board - this is the PRIMARY cap
+      // Recommendation detection is SECONDARY (kicks in at 90% of target)
+      var maxPins = Math.ceil(target * pinCountBuffer);
       var sectionReachedRecs = false;
       var skippedRecs = 0;
+      console.log('[PA] Section "' + sectionName + '": target=' + target + ', maxPins=' + maxPins + ' (15% buffer)');
       stat('Scanning "' + sectionName + '" (expecting ~' + target + ')...', 0);
 
       function collect() {
-        // Stop if we hit the cap
-        if (pinData.size >= maxTarget) return;
+        // PRIMARY: Hard cap at 15% buffer
+        if (pinData.size >= maxPins) return;
 
         iframeDoc.querySelectorAll('a[href*="/pin/"]').forEach(function(link) {
-          if (pinData.size >= maxTarget) return;
+          if (pinData.size >= maxPins) return;
 
           var m = link.href.match(/\/pin\/(\d+)/);
           if (!m || pinData.has(m[1])) return;
@@ -920,11 +1002,12 @@
           if (!c) c = link.parentElement && link.parentElement.parentElement && link.parentElement.parentElement.parentElement;
           if (!c) return;
 
-          // Check for recommendation section once we're close to expected count
+          // SECONDARY: Check for recommendation section once near expected count
+          // Only start checking at 90% to avoid false positives early on
           if (!sectionReachedRecs && pinData.size >= target * 0.9) {
             if (isInRecommendationSection(c)) {
               sectionReachedRecs = true;
-              console.log('[PA] Section "' + sectionName + '" reached recs at ' + pinData.size);
+              console.log('[PA] Section "' + sectionName + '" reached recs at ' + pinData.size + '/' + target);
             }
           }
           if (sectionReachedRecs) {
@@ -951,8 +1034,8 @@
       collect();
       var lastCt = 0, sameCt = 0;
       for (var s = 0; s < 150; s++) {
-        // Stop if we hit the cap or recommendations
-        if (pinData.size >= maxTarget || sectionReachedRecs) break;
+        // Stop if we hit the cap (15% buffer) or recommendations
+        if (pinData.size >= maxPins || sectionReachedRecs) break;
 
         iframeWin.scrollBy(0, iframeWin.innerHeight * 2);
         await sleep(300);
@@ -963,7 +1046,8 @@
         if (ct === lastCt) { sameCt++; if (sameCt > 15) break; } else { sameCt = 0; lastCt = ct; }
       }
 
-      console.log('[PA] Section "' + sectionName + '" complete: ' + pinData.size + ' pins' + (skippedRecs > 0 ? ', skipped ' + skippedRecs + ' recs' : ''));
+      var stopReason = sectionReachedRecs ? 'recommendations detected' : (pinData.size >= maxPins ? 'cap reached (15%)' : (pinData.size >= target ? 'target reached' : 'no more pins'));
+      console.log('[PA] Section "' + sectionName + '" complete: ' + pinData.size + '/' + target + ' pins (' + stopReason + ')' + (skippedRecs > 0 ? ', skipped ' + skippedRecs + ' recs' : ''));
 
       var urls = [], pinIds = new Set();
       pinData.forEach(function(url, id) { if (url) { urls.push({ url: url, pinId: id }); pinIds.add(id); } });
