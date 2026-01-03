@@ -5,6 +5,10 @@
 1. **One-click downloading** - The download solution should be one click, or if not possible, as simple as possible
 2. **Sections first** - Handle sections first as they are the problematic area
 3. **Section accuracy** - Each section should contain only the pins within that section of the board, no more, no less
+4. **Duplicates** - There must be no duplicates when donwloading, each board and section should have the exact number of pins they contain on the website
+5. **Ordering** - Pins downloaded must be in the axact order in which they appear on the board / section.
+5. **Efficiency** - The downloader should be a s efficeint as physically possible, both when scanning the bards for pins and downloading them - think reducing browser bloat by deleting downloaded pins from the dom and downlaoding multriple images in parralel to reduce download time.
+5. **The script itself** - The script should be as simple and lightweight as humanly possible. Running the script on a new board should remove all cacheing of previous boards - i.e. no indication of a previous download's progress when applied to a new board.
 
 ## Overview
 
@@ -158,9 +162,152 @@ All debug output prefixed with `[PA]`:
 - `[PA] Found BoardSection: Name (slug) N pins`
 - `[PA] Total sections found: N`
 
+## Streaming Download Architecture (v8+)
+
+### Core Concept
+
+The downloader uses a **streaming pipeline** architecture:
+```
+Sections (iframe) → Main Board Scroll → Detect Pins → Queue → Parallel Workers → Download → DOM Cleanup
+```
+
+**Sections are always downloaded first** (Rule 2), then main board pins stream in parallel.
+
+### Download Flow (`startStreamingDownload`)
+
+1. **Read UI selections** - Get checked sections and main board checkbox state
+2. **Sections first** - For each selected section:
+   - Load section in hidden iframe via `collectFromSectionIframe()`
+   - Scroll iframe to collect all pins
+   - Download images sequentially, tracking pin IDs in `downloadedPinIds`
+   - Store in section subfolder: `BoardName/SectionName/00001.jpg`
+3. **Main board** (if selected) - Start parallel workers + scroll loop
+4. **Auto-save** - Create ZIP when complete (or when paused)
+
+### Play/Pause System
+
+- **Play Button**: Starts the streaming download process
+- **Pause & Save Button**: Stops scrolling, completes active downloads, saves ZIP with collected pins
+- User can pause anytime to get a partial download, then resume later
+
+### Queue-Based Worker System
+
+```javascript
+var pinQueue = [];           // Pins waiting to download
+var downloadedPinIds = new Set();  // Prevents duplicates (claimed on queue, not after download)
+var activeDownloads = 0;     // Current concurrent fetches
+var MAX_PARALLEL = 10;       // Worker count
+```
+
+**Workers**: 10 parallel async workers continuously pull from queue:
+```javascript
+async function downloadWorker() {
+  while (isPlaying && !isPaused) {
+    if (pinQueue.length === 0) { await sleep(50); continue; }
+    var item = pinQueue.shift();
+    // ... fetch and save
+  }
+}
+```
+
+**Scanner**: Runs during scroll, adds new pins to queue:
+```javascript
+function scanForNewPins() {
+  // Scan DOM elements with [data-test-id="pin"]
+  // Scan <script> tags for JSON pin data
+  // CRITICAL: Add to downloadedPinIds IMMEDIATELY when queuing (not after download)
+  // This prevents race conditions with parallel workers
+}
+```
+
+### DOM Control Strategy
+
+**CRITICAL**: Pinterest uses lazy loading - it only loads new pins when you scroll and there's visible space.
+
+#### Option 1: Remove Elements (Fast, but breaks lazy loading)
+```javascript
+item.element.remove();
+```
+- Frees memory immediately
+- BUT: Pinterest sees empty viewport, may stop loading new pins
+- Risk: Incomplete downloads on large boards
+
+#### Option 2: Fade Elements (Slower, but reliable)
+```javascript
+item.element.classList.add('pa-faded');  // opacity: 0.2
+```
+- Preserves DOM structure
+- Pinterest's lazy loader keeps working
+- Recommended for complete board downloads
+
+#### Current Implementation (v7)
+Uses `remove()` for speed. If boards aren't fully downloading, switch to fading.
+
+### Scroll Loop
+
+```javascript
+async function scrollLoop() {
+  while (isPlaying && !isPaused && !scrollAbort) {
+    window.scrollBy(0, window.innerHeight * 1.5);
+    await sleep(150);
+    scanForNewPins();
+
+    // Stuck detection: if no new pins for 20 iterations
+    // Try aggressive scroll to bottom
+    // If still stuck after 3 attempts, assume complete
+  }
+}
+```
+
+### Duplicate Prevention (v8 - Claim-on-Queue)
+
+**Critical insight**: With 10 parallel workers, checking `downloadedPinIds` after download creates a race condition where the same pin can be queued multiple times before any worker finishes.
+
+**Solution**: Claim pin IDs immediately when adding to queue, not after download:
+```javascript
+// In scanForNewPins():
+if (downloadedPinIds.has(pinId)) return;  // Already claimed?
+downloadedPinIds.add(pinId);              // CLAIM IMMEDIATELY
+pinQueue.push({pinId, url, element});     // Then queue
+```
+
+**Three-layer protection**:
+1. `downloadedPinIds.add(pinId)` - Claim atomically when queuing (prevents race conditions)
+2. `container.dataset.paQueued` - DOM element marked to skip on rescan
+3. Section pins claimed before main board starts (prevents cross-contamination)
+
+### Live Stats Display
+
+```
+[●] Downloading... 1,234 saved
+1234 downloaded · 56 queued · 10 active
+```
+
+Updates in real-time via `updateLiveStats()`.
+
+### Section Download Flow
+
+1. Sections download first via iframe (see Section Download Process above)
+2. Section pin IDs added to `downloadedPinIds` to prevent re-download
+3. Main board streams after sections complete
+4. All files combined into single ZIP with folder structure
+
+### Performance Tuning
+
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| MAX_PARALLEL | 10 | Concurrent fetch workers |
+| Scroll delay | 150ms | Time between scrolls |
+| Worker poll | 50ms | Queue check interval |
+| Stuck threshold | 20 | Iterations before aggressive scroll |
+
+Increase MAX_PARALLEL for faster downloads (may hit rate limits).
+Decrease scroll delay for faster scanning (may miss pins).
+
 ## Limitations
 
 - Popup blocker may block section tab opening
 - Cross-origin restrictions prevent accessing some section tabs
 - Pinterest's DOM structure changes frequently, may require selector updates
 - Large boards may timeout or miss some pins
+- DOM removal can break Pinterest's lazy loading on very large boards

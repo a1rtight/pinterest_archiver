@@ -448,6 +448,7 @@
   }
 
   // Scan DOM for new pins and add to queue
+  // CRITICAL: Claim pin IDs immediately in downloadedPinIds to prevent duplicates with parallel workers
   function scanForNewPins() {
     var found = 0;
     var pinElements = document.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
@@ -463,10 +464,23 @@
       var pinId = match[1];
       if (downloadedPinIds.has(pinId)) return;
 
-      var img = container.querySelector('img[src*="pinimg.com"]');
-      if (img && isValidPinImage(img.src)) {
+      // Find image - try multiple sources
+      var imgUrl = null;
+      var img = container.querySelector('img');
+      if (img) {
+        if (img.src && img.src.indexOf('pinimg.com') !== -1) imgUrl = img.src;
+        else if (img.srcset && img.srcset.indexOf('pinimg.com') !== -1) imgUrl = img.srcset.split(' ')[0];
+      }
+      if (!imgUrl) {
+        var video = container.querySelector('video[poster]');
+        if (video && video.poster && video.poster.indexOf('pinimg.com') !== -1) imgUrl = video.poster;
+      }
+
+      if (imgUrl && isValidPinImage(imgUrl)) {
+        downloadedPinIds.add(pinId);
         container.dataset.paQueued = 'true';
-        pinQueue.push({ pinId: pinId, url: getOriginalUrl(img.src), element: container });
+        fileCounter++;
+        pinQueue.push({ pinId: pinId, url: getOriginalUrl(imgUrl), element: container, fileNum: fileCounter });
         found++;
       }
     });
@@ -480,10 +494,12 @@
       var pattern = /"id"\s*:\s*"(\d+)"[^}]*?"images"[^}]*?"orig"[^}]*?"url"\s*:\s*"([^"]+pinimg[^"]+)"/g;
       var m;
       while ((m = pattern.exec(text)) !== null) {
-        if (!downloadedPinIds.has(m[1]) && !pinQueue.some(function(p) { return p.pinId === m[1]; })) {
+        if (!downloadedPinIds.has(m[1])) {
           var url = m[2].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
           if (isValidPinImage(url)) {
-            pinQueue.push({ pinId: m[1], url: getOriginalUrl(url), element: null });
+            downloadedPinIds.add(m[1]);
+            fileCounter++; // Assign number NOW
+            pinQueue.push({ pinId: m[1], url: getOriginalUrl(url), element: null, fileNum: fileCounter });
             found++;
           }
         }
@@ -493,40 +509,46 @@
     return found;
   }
 
-  // Download worker - processes items from queue
-  async function downloadWorker() {
+  // Download in synchronized batches - preserves order because Promise.all returns in input order
+  var isScrolling = false;
+
+  async function downloadBatches() {
     while (isPlaying && !isPaused) {
+      // Wait for pins to be available
       if (pinQueue.length === 0) {
+        if (!isScrolling) break; // Done scrolling and queue empty
         await sleep(50);
         continue;
       }
 
-      var item = pinQueue.shift();
-      if (!item || downloadedPinIds.has(item.pinId)) continue;
-
-      activeDownloads++;
+      // Grab a batch (up to MAX_PARALLEL)
+      var batch = pinQueue.splice(0, MAX_PARALLEL);
+      activeDownloads = batch.length;
       updateLiveStats();
 
-      try {
+      // Download all in parallel - Promise.all preserves order!
+      var results = await Promise.all(batch.map(async function(item) {
         var data = await fetchImage(item.url);
-        if (data) {
-          fileCounter++;
+        return { item: item, data: data };
+      }));
+
+      // Add results IN ORDER (Promise.all guarantees order matches input)
+      results.forEach(function(r) {
+        if (r.data) {
           downloadedFiles.push({
-            name: safeName + '/' + String(fileCounter).padStart(5, '0') + '.jpg',
-            data: data,
-            crc: crc32(new Uint8Array(data))
+            name: safeName + '/' + String(r.item.fileNum).padStart(5, '0') + '.jpg',
+            data: r.data,
+            crc: crc32(new Uint8Array(r.data))
           });
-          downloadedPinIds.add(item.pinId);
-
-          // Remove from DOM to free memory
-          if (item.element && item.element.parentNode) {
-            item.element.dataset.paDownloaded = 'true';
-            item.element.remove();
-          }
         }
-      } catch (e) {}
+        // Mark element as downloaded
+        if (r.item.element) {
+          r.item.element.dataset.paDownloaded = 'true';
+          r.item.element.style.opacity = '0.3';
+        }
+      });
 
-      activeDownloads--;
+      activeDownloads = 0;
       updateLiveStats();
     }
   }
@@ -534,35 +556,44 @@
   // Scroll loop - continuously scrolls to load more pins
   async function scrollLoop() {
     var noNewPinsCount = 0;
-    var lastQueueSize = 0;
+    // Track total pins (queue + downloaded) to detect when we stop finding new pins
+    var lastTotalPins = pinQueue.length + downloadedFiles.length;
+
+    // CRITICAL: Scan pins at current position FIRST before any scrolling
+    scanForNewPins();
+    updateLiveStats();
+    await sleep(150);
 
     while (isPlaying && !isPaused && !scrollAbort) {
-      // Scroll down
+      // Scroll down THEN scan (we already scanned initial position above)
       window.scrollBy(0, window.innerHeight * 1.5);
       await sleep(150);
 
-      // Scan for new pins
+      // Scan for new pins at new position
       var found = scanForNewPins();
       updateLiveStats();
 
-      // Check if we're finding new pins
-      if (pinQueue.length === lastQueueSize && found === 0) {
+      // Check if we're finding new pins (compare TOTAL not just queue)
+      var currentTotal = pinQueue.length + downloadedFiles.length;
+      if (currentTotal === lastTotalPins && found === 0) {
         noNewPinsCount++;
         if (noNewPinsCount > 20) {
           // Try more aggressive scroll
           window.scrollTo(0, document.body.scrollHeight);
           await sleep(500);
           scanForNewPins();
-          if (pinQueue.length === lastQueueSize) {
+          var afterAggressiveTotal = pinQueue.length + downloadedFiles.length;
+          if (afterAggressiveTotal === lastTotalPins) {
             // Still no new pins, check if we've reached the end
             stat('Reached end of board', 1);
             break;
           }
           noNewPinsCount = 0;
+          lastTotalPins = afterAggressiveTotal;
         }
       } else {
         noNewPinsCount = 0;
-        lastQueueSize = pinQueue.length + downloadedFiles.length;
+        lastTotalPins = currentTotal;
       }
 
       var liveText = document.getElementById('pa-live-text');
@@ -586,23 +617,125 @@
     document.getElementById('pa-live-status').style.display = 'block';
     stat('Starting...', 0);
 
-    // Start download workers (parallel)
-    var workers = [];
-    for (var i = 0; i < MAX_PARALLEL; i++) {
-      workers.push(downloadWorker());
+    // Get selected sections from checkboxes
+    var selectedSections = [];
+    var downloadMainBoard = true;
+    document.querySelectorAll('.pa-section-cb').forEach(function(cb) {
+      if (cb.dataset.main === 'true') {
+        downloadMainBoard = cb.checked;
+      } else if (cb.checked && cb.dataset.idx) {
+        var idx = parseInt(cb.dataset.idx, 10);
+        if (boardSections[idx]) selectedSections.push(boardSections[idx]);
+      }
+    });
+
+    // SECTIONS FIRST (Rule 2 from CLAUDE.md)
+    if (selectedSections.length > 0) {
+      for (var i = 0; i < selectedSections.length && !isPaused; i++) {
+        var section = selectedSections[i];
+        var sectionUrl = 'https://www.pinterest.com' + section.url;
+        stat('Downloading section ' + (i + 1) + '/' + selectedSections.length + ': ' + section.name, i / selectedSections.length);
+
+        var result = await collectFromSectionIframe(sectionUrl, section.name, section.pinCount);
+
+        // Download section images and add to files with section subfolder
+        var sectionFolder = safeName + '/' + section.name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
+        var sectionCounter = 0;
+
+        for (var j = 0; j < result.urls.length && !isPaused; j++) {
+          var item = result.urls[j];
+          if (downloadedPinIds.has(item.pinId)) continue; // Already claimed (from another section)
+          downloadedPinIds.add(item.pinId); // CLAIM IMMEDIATELY before fetch
+
+          var data = await fetchImage(item.url);
+          if (data) {
+            sectionCounter++;
+            downloadedFiles.push({
+              name: sectionFolder + '/' + String(sectionCounter).padStart(5, '0') + '.jpg',
+              data: data,
+              crc: crc32(new Uint8Array(data))
+            });
+          }
+          updateLiveStats();
+        }
+
+        var liveText = document.getElementById('pa-live-text');
+        if (liveText) liveText.textContent = 'Section "' + section.name + '": ' + sectionCounter + ' saved';
+      }
     }
 
-    // Start scroll loop
-    var scrollPromise = scrollLoop();
+    // Download main board if selected (after sections)
+    if (downloadMainBoard && !isPaused) {
+      stat('Downloading main board...', 0);
 
-    // Wait for scroll to finish
-    await scrollPromise;
+      // Start from top of page to ensure we don't miss any pins
+      window.scrollTo(0, 0);
+      await sleep(500);
 
-    // Wait for queue to drain
-    stat('Finishing downloads...', 0.9);
-    while (pinQueue.length > 0 || activeDownloads > 0) {
-      await sleep(100);
-      updateLiveStats();
+      // Start scroll loop and batch downloader in parallel
+      isScrolling = true;
+      var scrollPromise = scrollLoop().then(function() { isScrolling = false; });
+      var downloadPromise = downloadBatches();
+
+      // Wait for both to complete
+      await scrollPromise;
+      await downloadPromise;
+
+      // FINAL SWEEP: Multiple passes to catch ALL lazy-loaded pins
+      // Pinterest lazy-loads images - need to scroll multiple times to trigger all loading
+      stat('Final sweep for missed pins...', 0.95);
+
+      for (var pass = 0; pass < 3 && !isPaused; pass++) {
+        // Scroll to very bottom first to trigger all lazy loading
+        window.scrollTo(0, document.body.scrollHeight);
+        await sleep(800);
+
+        // Now scroll back to top
+        window.scrollTo(0, 0);
+        await sleep(800);
+
+        var foundInPass = 0;
+        var pageHeight = document.body.scrollHeight;
+        var scrollStep = window.innerHeight * 0.8;
+        var scrollPos = 0;
+
+        // Scroll through entire page slowly to catch everything
+        while (scrollPos < pageHeight && !isPaused) {
+          window.scrollTo(0, scrollPos);
+          await sleep(400); // Longer wait for images to load
+
+          var found = scanForNewPins();
+          foundInPass += found;
+
+          // Download any queued pins immediately
+          while (pinQueue.length > 0 && !isPaused) {
+            var batch = pinQueue.splice(0, MAX_PARALLEL);
+            var results = await Promise.all(batch.map(async function(item) {
+              var data = await fetchImage(item.url);
+              return { item: item, data: data };
+            }));
+            results.forEach(function(r) {
+              if (r.data) {
+                downloadedFiles.push({
+                  name: safeName + '/' + String(r.item.fileNum).padStart(5, '0') + '.jpg',
+                  data: r.data,
+                  crc: crc32(new Uint8Array(r.data))
+                });
+              }
+            });
+            updateLiveStats();
+          }
+
+          scrollPos += scrollStep;
+        }
+
+        stat('Pass ' + (pass + 1) + '/3: found ' + foundInPass + ' more pins', 0.95 + (pass * 0.015));
+
+        // If we didn't find any new pins in this pass, we're done
+        if (foundInPass === 0) break;
+      }
+
+      stat('Finishing downloads...', 0.99);
     }
 
     // Auto-save if not paused manually
@@ -653,6 +786,9 @@
     stat('Creating zip with ' + downloadedFiles.length + ' images...', 1);
     await sleep(100);
 
+    // Sort files by name to ensure correct order in ZIP
+    downloadedFiles.sort(function(a, b) { return a.name.localeCompare(b.name); });
+
     var zipData = createZip(downloadedFiles);
     var blob = new Blob([zipData], { type: 'application/zip' });
     var a = document.createElement('a');
@@ -680,7 +816,7 @@
       iframe.onload = function() { loaded = true; };
       for (var w = 0; w < 20 && !loaded; w++) await sleep(500);
       if (!loaded) { iframe.remove(); resolve({ urls: [], pinIds: new Set() }); return; }
-      await sleep(2000);
+      await sleep(3000); // Wait longer for React hydration to complete
       var iframeDoc;
       try { iframeDoc = iframe.contentDocument || iframe.contentWindow.document; }
       catch (e) { iframe.remove(); resolve({ urls: [], pinIds: new Set() }); return; }
@@ -691,10 +827,23 @@
         iframeDoc.querySelectorAll('a[href*="/pin/"]').forEach(function(link) {
           var m = link.href.match(/\/pin\/(\d+)/);
           if (!m || pinData.has(m[1])) return;
-          var c = link.closest('[data-test-id="pin"]') || link.closest('[data-grid-item="true"]') || link.parentElement?.parentElement?.parentElement;
+          var c = link.closest('[data-test-id="pin"]') || link.closest('[data-grid-item="true"]');
+          if (!c) c = link.parentElement && link.parentElement.parentElement && link.parentElement.parentElement.parentElement;
           if (!c) return;
-          var img = c.querySelector('img[src*="pinimg.com"]');
-          if (img && isValidPinImage(img.src)) pinData.set(m[1], getOriginalUrl(img.src));
+
+          // Find image - try multiple sources
+          var imgUrl = null;
+          var img = c.querySelector('img');
+          if (img) {
+            if (img.src && img.src.indexOf('pinimg.com') !== -1) imgUrl = img.src;
+            else if (img.srcset && img.srcset.indexOf('pinimg.com') !== -1) imgUrl = img.srcset.split(' ')[0];
+          }
+          if (!imgUrl) {
+            var video = c.querySelector('video[poster]');
+            if (video && video.poster && video.poster.indexOf('pinimg.com') !== -1) imgUrl = video.poster;
+          }
+
+          if (imgUrl && isValidPinImage(imgUrl)) pinData.set(m[1], getOriginalUrl(imgUrl));
         });
         iframeDoc.querySelectorAll('script').forEach(function(script) {
           var text = script.textContent || '';
@@ -729,4 +878,4 @@
   }
 
   createUI();
-})(); // LATEST v7 - streaming play/pause with parallel downloads
+})(); // LATEST VERSION - v8.6 improved final sweep: 3 passes with bottom-to-top trigger
