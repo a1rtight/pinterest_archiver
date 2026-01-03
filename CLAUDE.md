@@ -7,8 +7,16 @@
 3. **Section accuracy** - Each section should contain only the pins within that section of the board, no more, no less
 4. **Duplicates** - There must be no duplicates when donwloading, each board and section should have the exact number of pins they contain on the website
 5. **Ordering** - Pins downloaded must be in the axact order in which they appear on the board / section.
-5. **Efficiency** - The downloader should be a s efficeint as physically possible, both when scanning the bards for pins and downloading them - think reducing browser bloat by deleting downloaded pins from the dom and downlaoding multriple images in parralel to reduce download time.
+5. **Efficiency** - The downloader should be as efficeint as physically possible, both when scanning the bards for pins and downloading them - think reducing browser bloat by deleting downloaded pins from the dom and downlaoding multriple images in parralel to reduce download time.
 5. **The script itself** - The script should be as simple and lightweight as humanly possible. Running the script on a new board should remove all cacheing of previous boards - i.e. no indication of a previous download's progress when applied to a new board.
+
+## Method
+1. **Pin capture** - Only pins on boards / sections made by the user should be downlaoded - this excludes pinterest own suggested ideas etc - find this by finding the boards classes / id's and only download from those boards. This is incredibly important.
+
+2. **Pin capping** - Run a hard cap on each board or section ensuring the amount of pins in not surpasses, so if a board has 136 pins, the download should have exactly 136 pins. 
+
+
+
 
 ## Overview
 
