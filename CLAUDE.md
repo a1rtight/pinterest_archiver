@@ -11,9 +11,50 @@
 5. **The script itself** - The script should be as simple and lightweight as humanly possible. Running the script on a new board should remove all cacheing of previous boards - i.e. no indication of a previous download's progress when applied to a new board.
 
 ## Method
-1. **Pin capture** - Only pins on boards / sections made by the user should be downlaoded - this excludes pinterest own suggested ideas etc - find this by finding the boards classes / id's and only download from those boards. This is incredibly important.
+1. **Pin capture** - Only pins on boards / sections made by the user should be downloaded - this excludes pinterest own suggested ideas etc. This is incredibly important.
 
-2. **Pin capping** - Run a hard cap on each board or section ensuring the amount of pins in not surpasses, so if a board has 136 pins, the download should have exactly 136 pins. 
+2. **Pin capping** - Run a hard cap on each board or section ensuring the amount of pins is not surpassed, so if a board has 136 pins, the download should have exactly 136 pins.
+
+## Recommendation Filtering (v10.0 - WORKING SOLUTION)
+
+Pinterest uses **identical DOM markup** for board pins and recommendation pins - there's no `data-test-id`, class, or attribute that distinguishes them. Multiple approaches were tried and failed:
+
+### Failed Approaches
+- ❌ **Board ID JSON parsing** - Pinterest's JSON structure didn't match expected patterns
+- ❌ **Container-based filtering** - Too aggressive, only captured 1 pin per section
+- ❌ **Feed source markers** (BoardFeedResource vs RelatedPinFeedResource) - Inconsistent
+- ❌ **Heading detection alone** - Found "More ideas" heading too early (10 pins out of 189)
+
+### Working Solution: Hybrid Filtering
+
+Combines **hard cap** (primary) with **recommendation section detection** (secondary):
+
+```javascript
+// 1. PRIMARY: Hard cap based on expected pin count with 15% buffer
+var expectedPinCount = totalPins - sectionPinTotal;
+var maxPins = Math.ceil(expectedPinCount * 1.15);
+
+// Stop collecting when we hit the cap
+if (downloadedPinIds.size >= maxPins) return;
+
+// 2. SECONDARY: Detect "More ideas" section once near expected count
+if (downloadedPinIds.size >= expectedPinCount * 0.9) {
+  if (isInRecommendationSection(element)) {
+    reachedRecommendations = true;
+  }
+}
+```
+
+#### `isInRecommendationSection(element)`
+Walks up the DOM checking previous siblings for recommendation markers:
+- Text containing "more ideas", "more to explore", "picked for you", "inspired by", "you might like"
+- H1/H2/H3 headings with similar text
+
+#### Why This Works
+1. **Board pins come first** - Pinterest always shows board pins before recommendations
+2. **Buffer handles count inaccuracy** - 15% buffer accounts for Pinterest's sometimes-wrong counts
+3. **Early termination** - If recommendation heading found before cap, stops immediately
+4. **Applies to sections too** - Same logic works for both main board and section iframes 
 
 
 

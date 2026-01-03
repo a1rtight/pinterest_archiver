@@ -21,7 +21,6 @@
   var scrollAbort = false;
   var fileCounter = 0;
   var safeName = '';
-  var mainBoardPinLimit = 0; // Hard cap for main board pins
 
   var s = document.createElement('style');
   s.id = 'pa-styles';
@@ -434,6 +433,46 @@
     return true;
   }
 
+  // ========== HYBRID FILTERING ==========
+  // 1. Primary: Hard cap based on expected pin count (with buffer)
+  // 2. Secondary: Detect when we enter "More ideas" / recommendation section
+  var expectedPinCount = 0;
+  var pinCountBuffer = 1.15; // Allow 15% buffer for Pinterest count inaccuracy
+  var reachedRecommendations = false;
+
+  function isInRecommendationSection(element) {
+    // Check if this pin is after a "More ideas" heading or in a different section
+    // Walk up to find if there's a section divider before this element
+    var current = element;
+    var stepsUp = 0;
+    while (current && stepsUp < 10) {
+      // Check previous siblings for recommendation markers
+      var prev = current.previousElementSibling;
+      while (prev) {
+        var text = prev.textContent || '';
+        // Look for "More ideas", "More to explore", "Picked for you" etc
+        if (/more ideas|more to explore|picked for you|inspired by|you might like/i.test(text)) {
+          console.log('[PA] Found recommendation marker: ' + text.substring(0, 50));
+          return true;
+        }
+        // Also check for h1/h2/h3 headings that might indicate a new section
+        var heading = prev.querySelector('h1, h2, h3');
+        if (heading) {
+          var headingText = heading.textContent || '';
+          if (/more ideas|explore|for you|inspired/i.test(headingText)) {
+            console.log('[PA] Found recommendation heading: ' + headingText);
+            return true;
+          }
+        }
+        prev = prev.previousElementSibling;
+      }
+      current = current.parentElement;
+      stepsUp++;
+    }
+    return false;
+  }
+  // ========== END HYBRID FILTERING ==========
+
   async function fetchImage(url) {
     try {
       var r = await fetch(url);
@@ -450,23 +489,41 @@
 
   // Scan DOM for new pins and add to queue
   // CRITICAL: Claim pin IDs immediately in downloadedPinIds to prevent duplicates with parallel workers
-  // HARD CAP: Never collect more pins than mainBoardPinLimit
+  // HYBRID FILTERING: Hard cap + recommendation section detection
+  var skippedRecs = 0;
   function scanForNewPins() {
     var found = 0;
 
-    // HARD CAP CHECK - stop if we've already collected enough main board pins
-    if (mainBoardPinLimit > 0 && fileCounter >= mainBoardPinLimit) {
-      return 0;
+    // PRIMARY CHECK: Have we collected enough pins?
+    var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
+    var currentCount = downloadedPinIds.size;
+    if (expectedPinCount > 0 && currentCount >= maxPins) {
+      console.log('[PA] Reached pin cap: ' + currentCount + '/' + maxPins);
+      return 0; // Stop collecting
     }
 
     var pinElements = document.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
 
     pinElements.forEach(function(container) {
-      // HARD CAP - stop mid-scan if we hit the limit
-      if (mainBoardPinLimit > 0 && fileCounter >= mainBoardPinLimit) return;
-
-      if (container.dataset.paQueued || container.dataset.paDownloaded) return;
+      if (container.dataset.paQueued || container.dataset.paDownloaded || container.dataset.paSkipped) return;
       if (container.closest('header, nav')) return;
+
+      // Check cap again inside loop
+      if (expectedPinCount > 0 && downloadedPinIds.size >= maxPins) return;
+
+      // SECONDARY CHECK: Are we in recommendations section?
+      if (!reachedRecommendations && downloadedPinIds.size >= expectedPinCount * 0.9) {
+        // Once we're close to expected count, start checking for recommendation markers
+        if (isInRecommendationSection(container)) {
+          reachedRecommendations = true;
+          console.log('[PA] Entered recommendations section at ' + downloadedPinIds.size + ' pins');
+        }
+      }
+      if (reachedRecommendations) {
+        container.dataset.paSkipped = 'recommendation';
+        skippedRecs++;
+        return;
+      }
 
       var link = container.querySelector('a[href*="/pin/"]');
       if (!link) return;
@@ -496,35 +553,8 @@
       }
     });
 
-    // Also scan script tags (only if not at cap)
-    if (mainBoardPinLimit === 0 || fileCounter < mainBoardPinLimit) {
-      document.querySelectorAll('script:not([src]):not([data-pa-scanned])').forEach(function(script) {
-        // HARD CAP - stop if we hit the limit
-        if (mainBoardPinLimit > 0 && fileCounter >= mainBoardPinLimit) return;
-
-        var text = script.textContent || '';
-        if (text.length < 100 || text.indexOf('pinimg.com') === -1) return;
-        script.dataset.paScanned = 'true';
-
-        var pattern = /"id"\s*:\s*"(\d+)"[^}]*?"images"[^}]*?"orig"[^}]*?"url"\s*:\s*"([^"]+pinimg[^"]+)"/g;
-        var m;
-        while ((m = pattern.exec(text)) !== null) {
-          // HARD CAP - stop if we hit the limit
-          if (mainBoardPinLimit > 0 && fileCounter >= mainBoardPinLimit) break;
-
-          if (!downloadedPinIds.has(m[1])) {
-            var url = m[2].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
-            if (isValidPinImage(url)) {
-              downloadedPinIds.add(m[1]);
-              fileCounter++;
-              pinQueue.push({ pinId: m[1], url: getOriginalUrl(url), element: null, fileNum: fileCounter });
-              found++;
-            }
-          }
-        }
-      });
-    }
-
+    // NOTE: Script tag scanning removed - we rely on DOM elements within board container
+    // JSON pins can't be verified for container membership
     return found;
   }
 
@@ -573,10 +603,11 @@
   }
 
   // Scroll loop - continuously scrolls to load more pins
+  // Uses HYBRID FILTERING: hard cap + recommendation detection
   async function scrollLoop() {
     var noNewPinsCount = 0;
-    // Track total pins (queue + downloaded) to detect when we stop finding new pins
     var lastTotalPins = pinQueue.length + downloadedFiles.length;
+    var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
 
     // CRITICAL: Scan pins at current position FIRST before any scrolling
     scanForNewPins();
@@ -584,34 +615,30 @@
     await sleep(150);
 
     while (isPlaying && !isPaused && !scrollAbort) {
-      // HARD CAP CHECK - stop scrolling if we've collected enough pins
-      if (mainBoardPinLimit > 0 && fileCounter >= mainBoardPinLimit) {
-        stat('Reached pin limit (' + mainBoardPinLimit + ')', 1);
-        console.log('[PA] Hard cap reached: ' + fileCounter + '/' + mainBoardPinLimit);
+      // Stop if we hit the cap or reached recommendations
+      if (reachedRecommendations || (expectedPinCount > 0 && downloadedPinIds.size >= maxPins)) {
+        stat('Reached pin limit: ' + downloadedPinIds.size + '/' + expectedPinCount, 1);
+        console.log('[PA] Stopping: reached pin limit or recommendations');
         break;
       }
 
-      // Scroll down THEN scan (we already scanned initial position above)
       window.scrollBy(0, window.innerHeight * 1.5);
       await sleep(150);
 
-      // Scan for new pins at new position
       var found = scanForNewPins();
       updateLiveStats();
 
-      // Check if we're finding new pins (compare TOTAL not just queue)
       var currentTotal = pinQueue.length + downloadedFiles.length;
       if (currentTotal === lastTotalPins && found === 0) {
         noNewPinsCount++;
         if (noNewPinsCount > 20) {
-          // Try more aggressive scroll
           window.scrollTo(0, document.body.scrollHeight);
           await sleep(500);
           scanForNewPins();
           var afterAggressiveTotal = pinQueue.length + downloadedFiles.length;
           if (afterAggressiveTotal === lastTotalPins) {
-            // Still no new pins, check if we've reached the end
-            stat('Reached end of board', 1);
+            stat('All board pins found: ' + downloadedFiles.length, 1);
+            console.log('[PA] Scroll complete: ' + downloadedFiles.length + ' board pins');
             break;
           }
           noNewPinsCount = 0;
@@ -624,7 +651,7 @@
 
       var liveText = document.getElementById('pa-live-text');
       if (liveText) {
-        liveText.textContent = 'Downloading... ' + downloadedFiles.length + ' saved';
+        liveText.textContent = 'Downloading... ' + downloadedFiles.length + '/' + expectedPinCount;
       }
     }
   }
@@ -655,11 +682,7 @@
       }
     });
 
-    // HARD CAP: Calculate exact number of main board pins allowed
-    // Main board pins = total pins - all section pins (not just selected ones)
-    var allSectionPins = boardSections.reduce(function(sum, sec) { return sum + (sec.pinCount || 0); }, 0);
-    mainBoardPinLimit = Math.max(0, totalPins - allSectionPins);
-    console.log('[PA] Hard cap: Main board limited to ' + mainBoardPinLimit + ' pins (total: ' + totalPins + ', sections: ' + allSectionPins + ')');
+    console.log('[PA] Using BOARD ID VERIFICATION to filter recommendations');
 
     // SECTIONS FIRST (Rule 2 from CLAUDE.md)
     if (selectedSections.length > 0) {
@@ -700,7 +723,16 @@
     if (downloadMainBoard && !isPaused) {
       stat('Downloading main board...', 0);
 
-      // Start from top of page to ensure we don't miss any pins
+      // Calculate expected main board pins (total minus section pins)
+      var sectionPinTotal = boardSections.reduce(function(sum, sec) { return sum + (sec.pinCount || 0); }, 0);
+      expectedPinCount = Math.max(0, totalPins - sectionPinTotal);
+      reachedRecommendations = false;
+      skippedRecs = 0;
+
+      console.log('[PA] Main board: expecting ~' + expectedPinCount + ' pins (total: ' + totalPins + ', sections: ' + sectionPinTotal + ')');
+      console.log('[PA] Will cap at ' + Math.ceil(expectedPinCount * pinCountBuffer) + ' pins (with ' + Math.round((pinCountBuffer - 1) * 100) + '% buffer)');
+
+      // Start from top of page
       window.scrollTo(0, 0);
       await sleep(500);
 
@@ -713,73 +745,69 @@
       await scrollPromise;
       await downloadPromise;
 
-      // FINAL SWEEP: Multiple passes to catch ALL lazy-loaded pins (respecting hard cap)
+      // FINAL SWEEP: Multiple passes to catch ALL lazy-loaded board pins
       // Pinterest lazy-loads images - need to scroll multiple times to trigger all loading
-      // Skip final sweep if we've already hit the hard cap
-      if (mainBoardPinLimit > 0 && fileCounter >= mainBoardPinLimit) {
-        stat('Pin limit reached, skipping final sweep', 0.95);
-        console.log('[PA] Skipping final sweep - hard cap already reached: ' + fileCounter + '/' + mainBoardPinLimit);
-      } else {
-        stat('Final sweep for missed pins...', 0.95);
+      // Hybrid filtering ensures we stop at expected count or when hitting recommendations
+      stat('Final sweep for missed pins...', 0.95);
 
-        for (var pass = 0; pass < 3 && !isPaused; pass++) {
-          // Check hard cap at start of each pass
-          if (mainBoardPinLimit > 0 && fileCounter >= mainBoardPinLimit) {
-            console.log('[PA] Final sweep stopped - hard cap reached: ' + fileCounter + '/' + mainBoardPinLimit);
-            break;
-          }
-
-          // Scroll to very bottom first to trigger all lazy loading
-          window.scrollTo(0, document.body.scrollHeight);
-          await sleep(800);
-
-          // Now scroll back to top
-          window.scrollTo(0, 0);
-          await sleep(800);
-
-          var foundInPass = 0;
-          var pageHeight = document.body.scrollHeight;
-          var scrollStep = window.innerHeight * 0.8;
-          var scrollPos = 0;
-
-          // Scroll through entire page slowly to catch everything
-          while (scrollPos < pageHeight && !isPaused) {
-            // Check hard cap before scanning
-            if (mainBoardPinLimit > 0 && fileCounter >= mainBoardPinLimit) break;
-
-            window.scrollTo(0, scrollPos);
-            await sleep(400); // Longer wait for images to load
-
-            var found = scanForNewPins();
-            foundInPass += found;
-
-            // Download any queued pins immediately
-            while (pinQueue.length > 0 && !isPaused) {
-              var batch = pinQueue.splice(0, MAX_PARALLEL);
-              var results = await Promise.all(batch.map(async function(item) {
-                var data = await fetchImage(item.url);
-                return { item: item, data: data };
-              }));
-              results.forEach(function(r) {
-                if (r.data) {
-                  downloadedFiles.push({
-                    name: safeName + '/' + String(r.item.fileNum).padStart(5, '0') + '.jpg',
-                    data: r.data,
-                    crc: crc32(new Uint8Array(r.data))
-                  });
-                }
-              });
-              updateLiveStats();
-            }
-
-            scrollPos += scrollStep;
-          }
-
-          stat('Pass ' + (pass + 1) + '/3: found ' + foundInPass + ' more pins', 0.95 + (pass * 0.015));
-
-          // If we didn't find any new pins in this pass, we're done
-          if (foundInPass === 0) break;
+      var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
+      for (var pass = 0; pass < 3 && !isPaused; pass++) {
+        // Stop if we've reached the cap or recommendations
+        if (reachedRecommendations || (expectedPinCount > 0 && downloadedPinIds.size >= maxPins)) {
+          console.log('[PA] Final sweep: already at limit, skipping pass ' + (pass + 1));
+          break;
         }
+
+        // Scroll to very bottom first to trigger all lazy loading
+        window.scrollTo(0, document.body.scrollHeight);
+        await sleep(800);
+
+        // Now scroll back to top
+        window.scrollTo(0, 0);
+        await sleep(800);
+
+        var foundInPass = 0;
+        var pageHeight = document.body.scrollHeight;
+        var scrollStep = window.innerHeight * 0.8;
+        var scrollPos = 0;
+
+        // Scroll through entire page slowly to catch everything
+        while (scrollPos < pageHeight && !isPaused && !reachedRecommendations) {
+          // Stop if we hit the cap
+          if (expectedPinCount > 0 && downloadedPinIds.size >= maxPins) break;
+
+          window.scrollTo(0, scrollPos);
+          await sleep(400); // Longer wait for images to load
+
+          var found = scanForNewPins();
+          foundInPass += found;
+
+          // Download any queued pins immediately
+          while (pinQueue.length > 0 && !isPaused) {
+            var batch = pinQueue.splice(0, MAX_PARALLEL);
+            var results = await Promise.all(batch.map(async function(item) {
+              var data = await fetchImage(item.url);
+              return { item: item, data: data };
+            }));
+            results.forEach(function(r) {
+              if (r.data) {
+                downloadedFiles.push({
+                  name: safeName + '/' + String(r.item.fileNum).padStart(5, '0') + '.jpg',
+                  data: r.data,
+                  crc: crc32(new Uint8Array(r.data))
+                });
+              }
+            });
+            updateLiveStats();
+          }
+
+          scrollPos += scrollStep;
+        }
+
+        stat('Pass ' + (pass + 1) + '/3: found ' + foundInPass + ' more board pins (skipped ' + skippedRecs + ' recs)', 0.95 + (pass * 0.015));
+
+        // If we didn't find any new board pins in this pass, we're done
+        if (foundInPass === 0) break;
       }
 
       stat('Finishing downloads...', 0.99);
@@ -852,7 +880,8 @@
   }
 
   // Section download via iframe (kept for sections support)
-  async function collectFromSectionIframe(sectionUrl, sectionName, expectedPinCount) {
+  // Uses HYBRID FILTERING: hard cap + recommendation detection
+  async function collectFromSectionIframe(sectionUrl, sectionName, sectionExpectedCount) {
     return new Promise(async function(resolve) {
       stat('Loading "' + sectionName + '"...', 0);
       var iframe = document.createElement('iframe');
@@ -863,20 +892,45 @@
       iframe.onload = function() { loaded = true; };
       for (var w = 0; w < 20 && !loaded; w++) await sleep(500);
       if (!loaded) { iframe.remove(); resolve({ urls: [], pinIds: new Set() }); return; }
-      await sleep(3000); // Wait longer for React hydration to complete
+      await sleep(2000); // Wait for React hydration
       var iframeDoc;
       try { iframeDoc = iframe.contentDocument || iframe.contentWindow.document; }
       catch (e) { iframe.remove(); resolve({ urls: [], pinIds: new Set() }); return; }
-      var pinData = new Map(), iframeWin = iframe.contentWindow, target = expectedPinCount || 50;
-      stat('Scanning "' + sectionName + '"...', 0);
+
+      var pinData = new Map(), iframeWin = iframe.contentWindow;
+      var target = sectionExpectedCount || 50;
+      var maxTarget = Math.ceil(target * pinCountBuffer);
+      var sectionReachedRecs = false;
+      var skippedRecs = 0;
+      stat('Scanning "' + sectionName + '" (expecting ~' + target + ')...', 0);
 
       function collect() {
+        // Stop if we hit the cap
+        if (pinData.size >= maxTarget) return;
+
         iframeDoc.querySelectorAll('a[href*="/pin/"]').forEach(function(link) {
+          if (pinData.size >= maxTarget) return;
+
           var m = link.href.match(/\/pin\/(\d+)/);
           if (!m || pinData.has(m[1])) return;
+
+          var pinId = m[1];
+
           var c = link.closest('[data-test-id="pin"]') || link.closest('[data-grid-item="true"]');
           if (!c) c = link.parentElement && link.parentElement.parentElement && link.parentElement.parentElement.parentElement;
           if (!c) return;
+
+          // Check for recommendation section once we're close to expected count
+          if (!sectionReachedRecs && pinData.size >= target * 0.9) {
+            if (isInRecommendationSection(c)) {
+              sectionReachedRecs = true;
+              console.log('[PA] Section "' + sectionName + '" reached recs at ' + pinData.size);
+            }
+          }
+          if (sectionReachedRecs) {
+            skippedRecs++;
+            return;
+          }
 
           // Find image - try multiple sources
           var imgUrl = null;
@@ -890,25 +944,16 @@
             if (video && video.poster && video.poster.indexOf('pinimg.com') !== -1) imgUrl = video.poster;
           }
 
-          if (imgUrl && isValidPinImage(imgUrl)) pinData.set(m[1], getOriginalUrl(imgUrl));
-        });
-        iframeDoc.querySelectorAll('script').forEach(function(script) {
-          var text = script.textContent || '';
-          if (text.length < 100 || text.indexOf('pinimg.com') === -1) return;
-          var pattern = /"id"\s*:\s*"(\d+)"[^}]*?"images"[^}]*?"orig"[^}]*?"url"\s*:\s*"([^"]+pinimg[^"]+)"/g;
-          var match;
-          while ((match = pattern.exec(text)) !== null) {
-            if (!pinData.has(match[1])) {
-              var url = match[2].replace(/\\u002F/g, '/').replace(/\\\//g, '/');
-              if (isValidPinImage(url)) pinData.set(match[1], getOriginalUrl(url));
-            }
-          }
+          if (imgUrl && isValidPinImage(imgUrl)) pinData.set(pinId, getOriginalUrl(imgUrl));
         });
       }
 
       collect();
       var lastCt = 0, sameCt = 0;
       for (var s = 0; s < 150; s++) {
+        // Stop if we hit the cap or recommendations
+        if (pinData.size >= maxTarget || sectionReachedRecs) break;
+
         iframeWin.scrollBy(0, iframeWin.innerHeight * 2);
         await sleep(300);
         collect();
@@ -917,6 +962,9 @@
         if (ct >= target) break;
         if (ct === lastCt) { sameCt++; if (sameCt > 15) break; } else { sameCt = 0; lastCt = ct; }
       }
+
+      console.log('[PA] Section "' + sectionName + '" complete: ' + pinData.size + ' pins' + (skippedRecs > 0 ? ', skipped ' + skippedRecs + ' recs' : ''));
+
       var urls = [], pinIds = new Set();
       pinData.forEach(function(url, id) { if (url) { urls.push({ url: url, pinId: id }); pinIds.add(id); } });
       iframe.remove();
@@ -925,4 +973,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v9.0 HARD CAP: Never download more pins than board contains
+})(); // LATEST VERSION - v10.0 HYBRID FILTERING: Pin count cap + recommendation section detection
