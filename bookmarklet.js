@@ -460,18 +460,36 @@
       if (!text || text.length < 100) return;
 
       // Find all pin IDs in the JSON
-      // Pinterest uses both numeric IDs (old: "12345678901") and alphanumeric IDs (new: "AXhq...")
-      var pinPattern = /"id"\s*:\s*"([A-Za-z0-9_-]{10,})"/g;
+      // Pinterest uses multiple formats:
+      // - Quoted string: "id":"474777985739200659" or "id":"AXhq..."
+      // - Unquoted number: "id":474777985739200659
+
+      // Pattern 1: Quoted IDs (alphanumeric, 10+ chars)
+      var quotedPattern = /"id"\s*:\s*"([A-Za-z0-9_-]{10,})"/g;
       var match;
-      while ((match = pinPattern.exec(text)) !== null) {
+      while ((match = quotedPattern.exec(text)) !== null) {
         var pinId = match[1];
         if (inventory.has(pinId)) continue;
 
-        // Look for image URL in nearby context (within 2000 chars after the ID)
         var contextEnd = Math.min(text.length, match.index + 2000);
         var context = text.substring(match.index, contextEnd);
 
-        // Pinterest stores originals in "orig":{"url":"..."}
+        var urlMatch = context.match(/"orig"\s*:\s*\{[^}]*"url"\s*:\s*"([^"]+pinimg\.com[^"]+)"/);
+        if (urlMatch) {
+          var url = urlMatch[1].replace(/\\u002F/g, '/');
+          inventory.set(pinId, { url: url });
+        }
+      }
+
+      // Pattern 2: Unquoted numeric IDs (15+ digits to avoid other numeric IDs)
+      var unquotedPattern = /"id"\s*:\s*(\d{15,})/g;
+      while ((match = unquotedPattern.exec(text)) !== null) {
+        var pinId = match[1];
+        if (inventory.has(pinId)) continue;
+
+        var contextEnd = Math.min(text.length, match.index + 2000);
+        var context = text.substring(match.index, contextEnd);
+
         var urlMatch = context.match(/"orig"\s*:\s*\{[^}]*"url"\s*:\s*"([^"]+pinimg\.com[^"]+)"/);
         if (urlMatch) {
           var url = urlMatch[1].replace(/\\u002F/g, '/');
@@ -1084,7 +1102,11 @@
 
     // VERIFICATION: Check for any pins missed by DOM scanning
     if (!isPaused && totalPins > 0) {
+      // First try JSON inventory
       await verifyAndDownloadMissing(totalPins);
+
+      // Then do a final DOM sweep for any unprocessed pins
+      await finalDOMVerification();
     }
 
     // Auto-save if not paused manually
@@ -1178,6 +1200,82 @@
 
     isScrolling = false;
     console.log('[PA] Verification complete: ' + downloadedFiles.length + ' total pins');
+  }
+
+  // FINAL DOM VERIFICATION: Catch any pins in the DOM that weren't processed
+  // This is a last-resort scan that ignores grid filtering
+  async function finalDOMVerification() {
+    console.log('[PA] Final DOM verification - scanning all pins in page...');
+
+    var allPinContainers = document.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
+    var foundMissing = 0;
+
+    allPinContainers.forEach(function(container) {
+      // Skip if already processed
+      if (container.dataset.paQueued || container.dataset.paDownloaded || container.dataset.paSkipped) {
+        return;
+      }
+
+      // Find pin link
+      var link = container.querySelector('a[href*="/pin/"]');
+      if (!link) return;
+
+      var match = link.href.match(/\/pin\/([^\/]+)/);
+      if (!match) return;
+
+      var pinId = match[1];
+
+      // Skip if already downloaded
+      if (downloadedPinIds.has(pinId)) return;
+
+      // Find image URL
+      var imgUrl = null;
+      var img = container.querySelector('img');
+      if (img) {
+        if (img.src && img.src.indexOf('pinimg.com') !== -1) imgUrl = img.src;
+        else if (img.srcset && img.srcset.indexOf('pinimg.com') !== -1) imgUrl = img.srcset.split(' ')[0];
+      }
+      if (!imgUrl) {
+        var video = container.querySelector('video[poster]');
+        if (video && video.poster && video.poster.indexOf('pinimg.com') !== -1) imgUrl = video.poster;
+      }
+
+      if (!imgUrl || !isValidPinImage(imgUrl)) return;
+
+      // This pin was missed! Queue it for download
+      console.log('[PA] Final verification: found missed pin ' + pinId);
+      foundMissing++;
+
+      downloadedPinIds.add(pinId);
+      fileCounter++;
+      pinQueue.push({
+        pinId: pinId,
+        url: getOriginalUrl(imgUrl),
+        element: container,
+        fileNum: fileCounter
+      });
+      container.dataset.paQueued = 'true';
+    });
+
+    if (foundMissing === 0) {
+      console.log('[PA] Final DOM verification: no missed pins found');
+      return;
+    }
+
+    console.log('[PA] Final verification: queued ' + foundMissing + ' missed pins');
+    stat('Downloading ' + foundMissing + ' missed pins...', 0.98);
+
+    // Download the missed pins
+    isScrolling = true;
+    startWorkers();
+
+    while (pinQueue.length > 0 || activeDownloads > 0) {
+      await sleep(100);
+      updateLiveStats();
+    }
+
+    isScrolling = false;
+    console.log('[PA] Final verification complete: ' + downloadedFiles.length + ' total pins');
   }
 
   // Save collected files to zip
@@ -1321,4 +1419,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v11.1 ALPHANUMERIC PIN ID SUPPORT + JSON INVENTORY VERIFICATION
+})(); // LATEST VERSION - v11.2 FINAL DOM VERIFICATION + ALPHANUMERIC PIN ID SUPPORT
