@@ -441,6 +441,11 @@
   var reachedRecommendations = false;
   var pinsBeforeMainBoard = 0; // Track section pins so main board cap only counts main board pins
 
+  // TERTIARY: Sibling-based grid container filtering
+  // Only collect pins within the same grid container as the first board pins
+  var boardGridContainer = null;       // Cached grid container for main board
+  var iframeGridContainers = new WeakMap(); // Cached grid containers per iframe document
+
   // Cache for section divider heading position (per document)
   var recHeadingCache = new WeakMap();
 
@@ -488,24 +493,45 @@
 
   function isInRecommendationSection(element) {
     var doc = element.ownerDocument || document;
-    var isIframe = doc !== document; // Are we in an iframe?
+    var isIframe = doc !== document;
 
-    // STRATEGY 1: Structural detection - find h1/h2 divider (ONLY FOR IFRAMES)
-    // The divider h1/h2 is a standalone heading (not inside a pin) that has pins after it
-    // Any pin appearing after this divider in DOM order is a recommendation
+    // Get the grid container - h1/h2 detection only applies AFTER the grid
+    var gridContainer = getGridContainer(doc);
+
+    // Helper: Check if a heading is AFTER the grid container (not before/title)
+    function isHeadingAfterGrid(heading) {
+      if (!gridContainer) return false;
+
+      // Check if heading comes AFTER grid container in DOM order
+      var position = gridContainer.compareDocumentPosition(heading);
+      // DOCUMENT_POSITION_FOLLOWING means heading comes after gridContainer
+      if (!(position & Node.DOCUMENT_POSITION_FOLLOWING)) {
+        return false; // Heading is before or inside grid - likely title
+      }
+
+      // Also skip headings that are very near the top of the page (likely title)
+      var rect = heading.getBoundingClientRect();
+      if (rect.top < 300) {
+        return false; // Too close to top, probably title
+      }
+
+      return true;
+    }
+
+    // STRATEGY 1: Structural detection for iframes
     if (isIframe) {
       var divider = findSectionDividerInDoc(doc);
-      if (divider) {
+      if (divider && isHeadingAfterGrid(divider)) {
         var position = divider.compareDocumentPosition(element);
         if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
-          console.log('[PA] Element is AFTER section divider');
+          console.log('[PA] Element is AFTER section divider (post-grid)');
           return true;
         }
       }
     }
 
-    // STRATEGY 2: Walk up DOM checking previous siblings for h1/h2 (main document)
-    // Look for any h1/h2 that is a sibling (not text-based, structural only)
+    // STRATEGY 2: Walk up DOM checking previous siblings for h1/h2
+    // Only trigger on h1/h2 that comes AFTER the grid container
     var current = element;
     var stepsUp = 0;
     while (current && stepsUp < 12) {
@@ -513,15 +539,19 @@
       while (prev) {
         // Check if this sibling IS an h1/h2 (not inside a pin)
         if (prev.matches('h1, h2') && !prev.closest('[data-test-id="pin"], [data-grid-item="true"]')) {
-          console.log('[PA] Found h1/h2 sibling divider:', (prev.textContent || '').substring(0, 40));
-          return true;
+          if (isHeadingAfterGrid(prev)) {
+            console.log('[PA] Found h1/h2 sibling divider (post-grid):', (prev.textContent || '').substring(0, 40));
+            return true;
+          }
         }
 
         // Check if this sibling CONTAINS an h1/h2 (not inside a pin)
         var heading = prev.querySelector('h1, h2');
         if (heading && !heading.closest('[data-test-id="pin"], [data-grid-item="true"]')) {
-          console.log('[PA] Found h1/h2 in sibling:', (heading.textContent || '').substring(0, 40));
-          return true;
+          if (isHeadingAfterGrid(heading)) {
+            console.log('[PA] Found h1/h2 in sibling (post-grid):', (heading.textContent || '').substring(0, 40));
+            return true;
+          }
         }
 
         prev = prev.previousElementSibling;
@@ -532,6 +562,91 @@
     return false;
   }
   // ========== END HYBRID FILTERING ==========
+
+  // ========== SIBLING-BASED GRID FILTERING ==========
+  // Third filter: Only collect pins within the same grid container as first board pins
+  // This ensures we get all siblings in the board grid before hitting recommendation grids
+
+  /**
+   * Find the grid container that holds board pins
+   * Walks up from a pin element until finding a container with multiple pins
+   */
+  function findGridContainer(pinElement, doc) {
+    var current = pinElement;
+    var iterations = 0;
+    var maxIterations = 15; // Don't walk too far up
+
+    while (current && current !== doc.body && iterations < maxIterations) {
+      current = current.parentElement;
+      if (!current) break;
+      iterations++;
+
+      // Count pins inside this container
+      var pinsInside = current.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
+
+      // A valid grid container should have 3+ pins
+      // 1 could be a pin wrapper, 2 could be coincidence
+      if (pinsInside.length >= 3) {
+        console.log('[PA] Found grid container at depth ' + iterations + ' with ' + pinsInside.length + ' pins');
+        return current;
+      }
+    }
+
+    console.log('[PA] WARNING: Could not determine grid container');
+    return null;
+  }
+
+  /**
+   * Get or detect the grid container for a document
+   * Caches result to avoid repeated DOM walks
+   */
+  function getGridContainer(doc) {
+    var isMainDoc = (doc === document);
+
+    // Check cache first
+    if (isMainDoc && boardGridContainer) {
+      return boardGridContainer;
+    }
+    if (!isMainDoc && iframeGridContainers.has(doc)) {
+      return iframeGridContainers.get(doc);
+    }
+
+    // Find first valid pin to use as reference
+    var firstPin = doc.querySelector('[data-test-id="pin"], [data-grid-item="true"]');
+    if (!firstPin) {
+      console.log('[PA] No pins found in document, cannot determine grid container');
+      return null;
+    }
+
+    var gridContainer = findGridContainer(firstPin, doc);
+
+    // Cache the result
+    if (isMainDoc) {
+      boardGridContainer = gridContainer;
+    } else {
+      iframeGridContainers.set(doc, gridContainer);
+    }
+
+    return gridContainer;
+  }
+
+  /**
+   * Check if a pin element is within the board's grid container
+   * Returns true if pin is in grid OR if grid couldn't be determined (fail open)
+   */
+  function isInBoardGrid(pinElement) {
+    var doc = pinElement.ownerDocument || document;
+    var gridContainer = getGridContainer(doc);
+
+    // If we couldn't determine grid, allow the pin (fail open)
+    // Other filters (cap, recommendation detection) still apply
+    if (!gridContainer) {
+      return true;
+    }
+
+    return gridContainer.contains(pinElement);
+  }
+  // ========== END SIBLING-BASED GRID FILTERING ==========
 
   async function fetchImage(url) {
     try {
@@ -554,14 +669,13 @@
   function scanForNewPins() {
     var found = 0;
 
-    // PRIMARY CHECK: Have we collected enough MAIN BOARD pins?
-    // Subtract section pins (pinsBeforeMainBoard) to only count main board pins against cap
-    var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
-    var mainBoardPinCount = downloadedPinIds.size - pinsBeforeMainBoard;
-    if (expectedPinCount > 0 && mainBoardPinCount >= maxPins) {
-      console.log('[PA] Reached pin cap: ' + mainBoardPinCount + '/' + maxPins + ' main board pins');
-      return 0; // Stop collecting
-    }
+    // CAP CHECK DISABLED - relying on grid container filtering instead
+    // var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
+    // var mainBoardPinCount = downloadedPinIds.size - pinsBeforeMainBoard;
+    // if (expectedPinCount > 0 && mainBoardPinCount >= maxPins) {
+    //   console.log('[PA] Reached pin cap: ' + mainBoardPinCount + '/' + maxPins + ' main board pins');
+    //   return 0;
+    // }
 
     var pinElements = document.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
 
@@ -569,18 +683,22 @@
       if (container.dataset.paQueued || container.dataset.paDownloaded || container.dataset.paSkipped) return;
       if (container.closest('header, nav')) return;
 
-      // Check cap again inside loop (count only main board pins)
-      var mbCount = downloadedPinIds.size - pinsBeforeMainBoard;
-      if (expectedPinCount > 0 && mbCount >= maxPins) return;
+      // CAP CHECK DISABLED - relying on grid container filtering instead
+      // var mbCount = downloadedPinIds.size - pinsBeforeMainBoard;
+      // if (expectedPinCount > 0 && mbCount >= maxPins) return;
+
+      // PRIMARY CHECK: Is this pin within the board's grid container?
+      // This ensures we only collect pins from the same grid as board pins
+      if (!isInBoardGrid(container)) {
+        container.dataset.paSkipped = 'outside-grid';
+        return;
+      }
 
       // SECONDARY CHECK: Are we in recommendations section?
-      // For main board, use 90% threshold (sibling-walk method needs pins to be near heading)
-      // The 15% buffer cap is the primary protection for main board
-      if (!reachedRecommendations && mbCount >= Math.max(10, expectedPinCount * 0.9)) {
-        if (isInRecommendationSection(container)) {
-          reachedRecommendations = true;
-          console.log('[PA] Entered recommendations section at ' + mbCount + '/' + expectedPinCount + ' main board pins');
-        }
+      // Grid container filtering is primary, but keep this as backup
+      if (!reachedRecommendations && isInRecommendationSection(container)) {
+        reachedRecommendations = true;
+        console.log('[PA] Entered recommendations section (h1/h2 detected)');
       }
       if (reachedRecommendations) {
         container.dataset.paSkipped = 'recommendation';
@@ -676,11 +794,10 @@
   }
 
   // Scroll loop - continuously scrolls to load more pins
-  // Uses HYBRID FILTERING: hard cap + recommendation detection
+  // Uses grid container filtering (primary) + recommendation detection (secondary)
   async function scrollLoop() {
     var noNewPinsCount = 0;
     var lastTotalPins = pinQueue.length + downloadedFiles.length;
-    var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
 
     // CRITICAL: Scan pins at current position FIRST before any scrolling
     scanForNewPins();
@@ -688,10 +805,10 @@
     await sleep(150);
 
     while (isPlaying && !isPaused && !scrollAbort) {
-      // Stop if we hit the cap or reached recommendations
-      if (reachedRecommendations || (expectedPinCount > 0 && downloadedPinIds.size >= maxPins)) {
-        stat('Reached pin limit: ' + downloadedPinIds.size + '/' + expectedPinCount, 1);
-        console.log('[PA] Stopping: reached pin limit or recommendations');
+      // Stop if we reached recommendations (grid container filtering is primary)
+      if (reachedRecommendations) {
+        stat('Reached recommendations section', 1);
+        console.log('[PA] Stopping: reached recommendations section');
         break;
       }
 
@@ -807,6 +924,7 @@
       expectedPinCount = Math.max(0, totalPins - sectionPinTotal);
       reachedRecommendations = false;
       skippedRecs = 0;
+      boardGridContainer = null; // Reset grid container for fresh detection
 
       // CRITICAL: Track how many pins were downloaded BEFORE main board
       // So we only count MAIN BOARD pins against the cap, not section pins
@@ -836,15 +954,13 @@
 
       // FINAL SWEEP: Multiple passes to catch ALL lazy-loaded board pins
       // Pinterest lazy-loads images - need to scroll multiple times to trigger all loading
-      // Hybrid filtering ensures we stop at expected count or when hitting recommendations
+      // Grid container filtering is primary, recommendation detection is backup
       stat('Final sweep for missed pins...', 0.95);
 
-      var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
       for (var pass = 0; pass < 3 && !isPaused; pass++) {
-        // Stop if we've reached the cap or recommendations (count only main board pins)
-        var mbPinCount = downloadedPinIds.size - pinsBeforeMainBoard;
-        if (reachedRecommendations || (expectedPinCount > 0 && mbPinCount >= maxPins)) {
-          console.log('[PA] Final sweep: already at limit (' + mbPinCount + '/' + maxPins + '), skipping pass ' + (pass + 1));
+        // Stop if we've reached recommendations (grid filtering is primary)
+        if (reachedRecommendations) {
+          console.log('[PA] Final sweep: reached recommendations, skipping pass ' + (pass + 1));
           break;
         }
 
@@ -867,9 +983,6 @@
 
         // Scroll through entire page slowly to catch everything
         while (scrollPos < pageHeight && !isPaused && !reachedRecommendations) {
-          var currentMbCount = downloadedPinIds.size - pinsBeforeMainBoard;
-          if (expectedPinCount > 0 && currentMbCount >= maxPins) break;
-
           window.scrollTo(0, scrollPos);
           await sleep(300);
 
@@ -978,20 +1091,14 @@
 
       var pinData = new Map(), iframeWin = iframe.contentWindow;
       var target = sectionExpectedCount || 50;
-      // Use same 15% buffer as main board - this is the PRIMARY cap
-      // Recommendation detection is SECONDARY (kicks in at 90% of target)
-      var maxPins = Math.ceil(target * pinCountBuffer);
+      // CAP DISABLED - relying on grid container filtering instead
       var sectionReachedRecs = false;
       var skippedRecs = 0;
-      console.log('[PA] Section "' + sectionName + '": target=' + target + ', maxPins=' + maxPins + ' (15% buffer)');
+      console.log('[PA] Section "' + sectionName + '": target=' + target + ' (grid filtering enabled)');
       stat('Scanning "' + sectionName + '" (expecting ~' + target + ')...', 0);
 
       function collect() {
-        // PRIMARY: Hard cap at 15% buffer
-        if (pinData.size >= maxPins) return;
-
         iframeDoc.querySelectorAll('a[href*="/pin/"]').forEach(function(link) {
-          if (pinData.size >= maxPins) return;
 
           var m = link.href.match(/\/pin\/(\d+)/);
           if (!m || pinData.has(m[1])) return;
@@ -1002,13 +1109,15 @@
           if (!c) c = link.parentElement && link.parentElement.parentElement && link.parentElement.parentElement.parentElement;
           if (!c) return;
 
-          // SECONDARY: Check for recommendation section once near expected count
-          // Only start checking at 90% to avoid false positives early on
-          if (!sectionReachedRecs && pinData.size >= target * 0.9) {
-            if (isInRecommendationSection(c)) {
-              sectionReachedRecs = true;
-              console.log('[PA] Section "' + sectionName + '" reached recs at ' + pinData.size + '/' + target);
-            }
+          // TERTIARY CHECK: Is this pin within the section's grid container?
+          if (!isInBoardGrid(c)) {
+            return;
+          }
+
+          // SECONDARY: Check for recommendation section (grid filtering is primary)
+          if (!sectionReachedRecs && isInRecommendationSection(c)) {
+            sectionReachedRecs = true;
+            console.log('[PA] Section "' + sectionName + '" reached recs (h1/h2 detected)');
           }
           if (sectionReachedRecs) {
             skippedRecs++;
@@ -1034,8 +1143,8 @@
       collect();
       var lastCt = 0, sameCt = 0;
       for (var s = 0; s < 150; s++) {
-        // Stop if we hit the cap (15% buffer) or recommendations
-        if (pinData.size >= maxPins || sectionReachedRecs) break;
+        // Stop if we reached recommendations (grid filtering is primary)
+        if (sectionReachedRecs) break;
 
         iframeWin.scrollBy(0, iframeWin.innerHeight * 2);
         await sleep(300);
@@ -1046,7 +1155,7 @@
         if (ct === lastCt) { sameCt++; if (sameCt > 15) break; } else { sameCt = 0; lastCt = ct; }
       }
 
-      var stopReason = sectionReachedRecs ? 'recommendations detected' : (pinData.size >= maxPins ? 'cap reached (15%)' : (pinData.size >= target ? 'target reached' : 'no more pins'));
+      var stopReason = sectionReachedRecs ? 'recommendations detected' : (pinData.size >= target ? 'target reached' : 'no more pins');
       console.log('[PA] Section "' + sectionName + '" complete: ' + pinData.size + '/' + target + ' pins (' + stopReason + ')' + (skippedRecs > 0 ? ', skipped ' + skippedRecs + ' recs' : ''));
 
       var urls = [], pinIds = new Set();
