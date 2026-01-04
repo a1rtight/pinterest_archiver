@@ -885,7 +885,7 @@
       var data = await fetchMedia(item.url);
       if (data) {
         downloadedFiles.push({
-          name: safeName + '/' + String(item.fileNum).padStart(5, '0') + '.jpg',
+          name: item.filePath || (safeName + '/' + String(item.fileNum).padStart(5, '0') + '.jpg'),
           data: data,
           crc: crc32(new Uint8Array(data))
         });
@@ -1005,33 +1005,39 @@
       for (var i = 0; i < selectedSections.length && !isPaused; i++) {
         var section = selectedSections[i];
         var sectionUrl = 'https://www.pinterest.com' + section.url;
-        stat('Downloading section ' + (i + 1) + '/' + selectedSections.length + ': ' + section.name, i / selectedSections.length);
+        stat('Scanning section ' + (i + 1) + '/' + selectedSections.length + ': ' + section.name, i / selectedSections.length);
 
         var result = await collectFromSectionIframe(sectionUrl, section.name, section.pinCount);
 
-        // Download section images and add to files with section subfolder
+        // Download section images using parallel workers
         var sectionFolder = safeName + '/' + section.name.replace(/[^a-zA-Z0-9 ]/g, '').trim();
         var sectionCounter = 0;
+        var sectionStartCount = downloadedFiles.length;
 
-        for (var j = 0; j < result.urls.length && !isPaused; j++) {
+        // Queue all section pins for parallel download
+        for (var j = 0; j < result.urls.length; j++) {
           var item = result.urls[j];
           if (downloadedPinIds.has(item.pinId)) continue; // Already claimed (from another section)
           downloadedPinIds.add(item.pinId); // CLAIM IMMEDIATELY before fetch
+          sectionCounter++;
+          pinQueue.push({
+            pinId: item.pinId,
+            url: item.url,
+            element: null,
+            filePath: sectionFolder + '/' + String(sectionCounter).padStart(5, '0') + '.jpg'
+          });
+        }
 
-          var data = await fetchMedia(item.url);
-          if (data) {
-            sectionCounter++;
-            downloadedFiles.push({
-              name: sectionFolder + '/' + String(sectionCounter).padStart(5, '0') + '.jpg',
-              data: data,
-              crc: crc32(new Uint8Array(data))
-            });
-          }
-          updateLiveStats();
+        // Start parallel workers and wait for section to complete
+        if (pinQueue.length > 0 && !isPaused) {
+          isScrolling = false; // Workers exit when queue empties
+          startWorkers();
+          await waitForWorkers();
         }
 
         var liveText = document.getElementById('pa-live-text');
-        if (liveText) liveText.textContent = 'Section "' + section.name + '": ' + sectionCounter + ' saved';
+        var sectionSaved = downloadedFiles.length - sectionStartCount;
+        if (liveText) liveText.textContent = 'Section "' + section.name + '": ' + sectionSaved + ' saved';
       }
     }
 
@@ -1342,9 +1348,9 @@
       document.body.appendChild(iframe);
       var loaded = false;
       iframe.onload = function() { loaded = true; };
-      for (var w = 0; w < 20 && !loaded; w++) await sleep(500);
+      for (var w = 0; w < 20 && !loaded; w++) await sleep(250);
       if (!loaded) { iframe.remove(); resolve({ urls: [], pinIds: new Set() }); return; }
-      await sleep(2000); // Wait for React hydration
+      await sleep(800); // Wait for React hydration
       var iframeDoc;
       try { iframeDoc = iframe.contentDocument || iframe.contentWindow.document; }
       catch (e) { iframe.remove(); resolve({ urls: [], pinIds: new Set() }); return; }
@@ -1399,13 +1405,13 @@
         // Stop if we reached recommendations (grid filtering is primary)
         if (sectionReachedRecs) break;
 
-        iframeWin.scrollBy(0, iframeWin.innerHeight * 2);
-        await sleep(300);
+        iframeWin.scrollBy(0, iframeWin.innerHeight * 3);
+        await sleep(120);
         collect();
         var ct = pinData.size;
         stat('"' + sectionName + '": ' + ct + '/' + target, ct / target);
         if (ct >= target) break;
-        if (ct === lastCt) { sameCt++; if (sameCt > 15) break; } else { sameCt = 0; lastCt = ct; }
+        if (ct === lastCt) { sameCt++; if (sameCt > 8) break; } else { sameCt = 0; lastCt = ct; }
       }
 
       var stopReason = sectionReachedRecs ? 'recommendations detected' : (pinData.size >= target ? 'target reached' : 'no more pins');
