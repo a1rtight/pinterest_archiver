@@ -449,6 +449,41 @@
   // Cache for section divider heading position (per document)
   var recHeadingCache = new WeakMap();
 
+  // INVENTORY: Extract ALL pin IDs and URLs from Pinterest's JSON data in <script> tags
+  // This is the authoritative source - Pinterest embeds complete board data here
+  function extractPinInventoryFromJSON(doc) {
+    var inventory = new Map(); // pinId -> {url}
+    var scripts = doc.querySelectorAll('script:not([src])');
+
+    scripts.forEach(function(script) {
+      var text = script.textContent;
+      if (!text || text.length < 100) return;
+
+      // Find all pin IDs in the JSON
+      // Pinterest uses both numeric IDs (old: "12345678901") and alphanumeric IDs (new: "AXhq...")
+      var pinPattern = /"id"\s*:\s*"([A-Za-z0-9_-]{10,})"/g;
+      var match;
+      while ((match = pinPattern.exec(text)) !== null) {
+        var pinId = match[1];
+        if (inventory.has(pinId)) continue;
+
+        // Look for image URL in nearby context (within 2000 chars after the ID)
+        var contextEnd = Math.min(text.length, match.index + 2000);
+        var context = text.substring(match.index, contextEnd);
+
+        // Pinterest stores originals in "orig":{"url":"..."}
+        var urlMatch = context.match(/"orig"\s*:\s*\{[^}]*"url"\s*:\s*"([^"]+pinimg\.com[^"]+)"/);
+        if (urlMatch) {
+          var url = urlMatch[1].replace(/\\u002F/g, '/');
+          inventory.set(pinId, { url: url });
+        }
+      }
+    });
+
+    console.log('[PA] Inventory: Found ' + inventory.size + ' pins in JSON data');
+    return inventory;
+  }
+
   function findSectionDividerInDoc(doc) {
     // Check cache first
     if (recHeadingCache.has(doc)) return recHeadingCache.get(doc);
@@ -750,7 +785,7 @@
 
       var link = container.querySelector('a[href*="/pin/"]');
       if (!link) return;
-      var match = link.href.match(/\/pin\/(\d+)/);
+      var match = link.href.match(/\/pin\/([^\/]+)/);
       if (!match) return;
       var pinId = match[1];
       if (downloadedPinIds.has(pinId)) return;
@@ -1047,6 +1082,11 @@
       stat('Finishing downloads...', 0.99);
     }
 
+    // VERIFICATION: Check for any pins missed by DOM scanning
+    if (!isPaused && totalPins > 0) {
+      await verifyAndDownloadMissing(totalPins);
+    }
+
     // Auto-save if not paused manually
     if (!isPaused) {
       await saveZip();
@@ -1082,6 +1122,62 @@
     document.getElementById('pa-pause').disabled = true;
 
     if (liveIndicator) liveIndicator.classList.remove('pa-paused');
+  }
+
+  // VERIFICATION: Check JSON inventory for any pins missed by DOM scanning
+  async function verifyAndDownloadMissing(expectedCount) {
+    var currentCount = downloadedPinIds.size;
+    console.log('[PA] Verification: Have ' + currentCount + '/' + expectedCount + ' pins');
+
+    // Extract complete inventory from JSON
+    var inventory = extractPinInventoryFromJSON(document);
+
+    // Check inventory count vs expected
+    if (inventory.size < expectedCount) {
+      console.log('[PA] Warning: JSON inventory (' + inventory.size + ') < expected (' + expectedCount + ')');
+    }
+
+    // Find pins we don't have
+    var missingPins = [];
+    inventory.forEach(function(data, pinId) {
+      if (!downloadedPinIds.has(pinId)) {
+        missingPins.push({ pinId: pinId, url: data.url });
+      }
+    });
+
+    if (missingPins.length === 0) {
+      console.log('[PA] Verification: All pins accounted for');
+      return;
+    }
+
+    console.log('[PA] Found ' + missingPins.length + ' missing pins to download');
+    stat('Downloading ' + missingPins.length + ' missing pins...', 0.95);
+
+    // Queue missing pins for download (uses existing parallel workers)
+    missingPins.forEach(function(pin) {
+      if (!downloadedPinIds.has(pin.pinId) && pin.url) {
+        downloadedPinIds.add(pin.pinId);
+        fileCounter++;
+        pinQueue.push({
+          pinId: pin.pinId,
+          url: getOriginalUrl(pin.url),
+          element: null, // No DOM element for inventory pins
+          fileNum: fileCounter
+        });
+      }
+    });
+
+    // Start workers if not running, wait for queue to drain
+    isScrolling = true;
+    startWorkers();
+
+    while (pinQueue.length > 0 || activeDownloads > 0) {
+      await sleep(100);
+      updateLiveStats();
+    }
+
+    isScrolling = false;
+    console.log('[PA] Verification complete: ' + downloadedFiles.length + ' total pins');
   }
 
   // Save collected files to zip
@@ -1142,7 +1238,7 @@
       function collect() {
         iframeDoc.querySelectorAll('a[href*="/pin/"]').forEach(function(link) {
 
-          var m = link.href.match(/\/pin\/(\d+)/);
+          var m = link.href.match(/\/pin\/([^\/]+)/);
           if (!m || pinData.has(m[1])) return;
 
           var pinId = m[1];
@@ -1200,6 +1296,23 @@
       var stopReason = sectionReachedRecs ? 'recommendations detected' : (pinData.size >= target ? 'target reached' : 'no more pins');
       console.log('[PA] Section "' + sectionName + '" complete: ' + pinData.size + '/' + target + ' pins (' + stopReason + ')' + (skippedRecs > 0 ? ', skipped ' + skippedRecs + ' recs' : ''));
 
+      // VERIFICATION: Check JSON inventory for any pins missed by DOM scanning
+      var sectionInventory = extractPinInventoryFromJSON(iframeDoc);
+      console.log('[PA] Section "' + sectionName + '": Inventory has ' + sectionInventory.size + ' pins');
+
+      // Find and recover any pins we missed
+      var recovered = 0;
+      sectionInventory.forEach(function(data, pinId) {
+        if (!pinData.has(pinId) && data.url) {
+          pinData.set(pinId, getOriginalUrl(data.url));
+          recovered++;
+        }
+      });
+      if (recovered > 0) {
+        console.log('[PA] Section "' + sectionName + '" verification: recovered ' + recovered + ' missed pins');
+      }
+      console.log('[PA] Section "' + sectionName + '" after verification: ' + pinData.size + ' pins');
+
       var urls = [], pinIds = new Set();
       pinData.forEach(function(url, id) { if (url) { urls.push({ url: url, pinId: id }); pinIds.add(id); } });
       iframe.remove();
@@ -1208,4 +1321,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v10.1 HYBRID FILTERING + FAST PARALLEL WORKERS
+})(); // LATEST VERSION - v11.1 ALPHANUMERIC PIN ID SUPPORT + JSON INVENTORY VERIFICATION
