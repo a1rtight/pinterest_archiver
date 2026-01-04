@@ -587,17 +587,16 @@
       // A valid grid container should have 3+ pins
       // 1 could be a pin wrapper, 2 could be coincidence
       if (pinsInside.length >= 3) {
-        console.log('[PA] Found grid container at depth ' + iterations + ' with ' + pinsInside.length + ' pins');
         return current;
       }
     }
 
-    console.log('[PA] WARNING: Could not determine grid container');
     return null;
   }
 
   /**
    * Get or detect the grid container for a document
+   * For main board with sections: finds the SECOND grid (pins grid, not sections grid)
    * Caches result to avoid repeated DOM walks
    */
   function getGridContainer(doc) {
@@ -611,14 +610,57 @@
       return iframeGridContainers.get(doc);
     }
 
-    // Find first valid pin to use as reference
-    var firstPin = doc.querySelector('[data-test-id="pin"], [data-grid-item="true"]');
-    if (!firstPin) {
-      console.log('[PA] No pins found in document, cannot determine grid container');
-      return null;
+    var gridContainer = null;
+
+    // For main document with sections, we need to find the PINS grid, not the sections grid
+    // The sections are often in the first grid, main board pins in the second
+    if (isMainDoc && boardSections.length > 0) {
+      console.log('[PA] Board has ' + boardSections.length + ' sections - looking for pins grid (not sections grid)');
+
+      // Find ALL grids that contain pin links (a[href*="/pin/"])
+      var allPins = doc.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
+      var gridsWithPins = new Map(); // grid -> count of actual pins (with /pin/ links)
+
+      allPins.forEach(function(pinContainer) {
+        // Only count containers that have actual pin links (not section thumbnails)
+        var pinLink = pinContainer.querySelector('a[href*="/pin/"]');
+        if (!pinLink) return;
+
+        var grid = findGridContainer(pinContainer, doc);
+        if (grid) {
+          gridsWithPins.set(grid, (gridsWithPins.get(grid) || 0) + 1);
+        }
+      });
+
+      // Find the grid with the most actual pins
+      var bestCount = 0;
+      gridsWithPins.forEach(function(count, grid) {
+        if (count > bestCount) {
+          bestCount = count;
+          gridContainer = grid;
+        }
+      });
+
+      if (gridContainer) {
+        console.log('[PA] Found main pins grid with ' + bestCount + ' pins');
+        // Only cache if we found enough pins - otherwise re-detect next time
+        if (bestCount < 10) {
+          console.log('[PA] Grid has few pins - will re-detect next scan (not caching)');
+          return gridContainer; // Return but don't cache
+        }
+      }
+    } else {
+      // For iframes or boards without sections, use first pin approach
+      var firstPin = doc.querySelector('[data-test-id="pin"], [data-grid-item="true"]');
+      if (firstPin) {
+        gridContainer = findGridContainer(firstPin, doc);
+      }
     }
 
-    var gridContainer = findGridContainer(firstPin, doc);
+    if (!gridContainer) {
+      console.log('[PA] WARNING: Could not determine grid container');
+      return null; // Don't cache null either - try again next time
+    }
 
     // Cache the result
     if (isMainDoc) {

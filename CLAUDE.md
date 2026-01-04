@@ -15,109 +15,131 @@
 
 2. **Pin capping** - Run a hard cap on each board or section ensuring the amount of pins is not surpassed, so if a board has 136 pins, the download should have exactly 136 pins.
 
-## Recommendation Filtering (v10.0 - WORKING SOLUTION)
+## Recommendation Filtering (v14.0 - GRID CONTAINER APPROACH)
 
-Pinterest uses **identical DOM markup** for board pins and recommendation pins - there's no `data-test-id`, class, or attribute that distinguishes them. Multiple approaches were tried and failed:
+Pinterest uses **identical DOM markup** for board pins and recommendation pins - there's no `data-test-id`, class, or attribute that distinguishes them.
 
-### Failed Approaches
-- ❌ **Board ID JSON parsing** - Pinterest's JSON structure didn't match expected patterns
-- ❌ **Container-based filtering** - Too aggressive, only captured 1 pin per section
-- ❌ **Feed source markers** (BoardFeedResource vs RelatedPinFeedResource) - Inconsistent
-- ❌ **Heading detection alone** - Found "More ideas" heading too early (10 pins out of 189)
+### Previous Approaches (Deprecated)
+- ❌ **Hard cap with 15% buffer** - Too aggressive, sometimes stopped early
+- ❌ **Text-based heading detection** - False positives on board titles
+- ❌ **First-pin grid detection** - Failed on boards with many sections (detected sections grid, not pins grid)
 
-### Working Solution: Hybrid Filtering
+### Working Solution: Grid Container Filtering (PRIMARY)
 
-Combines **hard cap** (primary) with **recommendation section detection** (secondary):
+The key insight: **Board pins and recommendation pins live in different DOM containers**. Board pins are siblings within a grid container, while recommendations are in a separate container below.
+
+#### How It Works
+
+1. **Find the Grid Container**: Walk up from pin elements to find parent containers with 3+ pins.
+
+2. **Handle Boards with Sections**: When a board has sections, the page has TWO grids:
+   - First grid: Section thumbnails (not actual pins)
+   - Second grid: Main board pins
+
+   We scan all containers and only count those with actual `/pin/` links to find the PINS grid.
+
+3. **Delayed Caching**: If we find fewer than 10 pins in the grid (Pinterest lazy-loading not complete), we DON'T cache - re-detect on next scan until more pins load.
+
+4. **Filter by Container Membership**: Only collect pins that are descendants of the cached grid container.
 
 ```javascript
-// 1. PRIMARY: Hard cap based on expected pin count with 15% buffer
-var expectedPinCount = totalPins - sectionPinTotal;
-var maxPins = Math.ceil(expectedPinCount * 1.15);
+// For boards WITH sections - find the pins grid, not sections grid
+if (isMainDoc && boardSections.length > 0) {
+  var allPins = doc.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
+  var gridsWithPins = new Map();
 
-// Stop collecting when we hit the cap
-if (downloadedPinIds.size >= maxPins) return;
+  allPins.forEach(function(pinContainer) {
+    // Only count containers with actual pin links (not section thumbnails)
+    var pinLink = pinContainer.querySelector('a[href*="/pin/"]');
+    if (!pinLink) return;
 
-// 2. SECONDARY: Detect "More ideas" section once near expected count
-if (downloadedPinIds.size >= expectedPinCount * 0.9) {
-  if (isInRecommendationSection(element)) {
-    reachedRecommendations = true;
+    var grid = findGridContainer(pinContainer, doc);
+    if (grid) {
+      gridsWithPins.set(grid, (gridsWithPins.get(grid) || 0) + 1);
+    }
+  });
+
+  // Find grid with most actual pins
+  gridsWithPins.forEach(function(count, grid) {
+    if (count > bestCount) {
+      bestCount = count;
+      gridContainer = grid;
+    }
+  });
+
+  // Only cache if enough pins loaded (handles lazy-loading)
+  if (bestCount < 10) {
+    return gridContainer; // Return but don't cache - re-detect next scan
   }
 }
 ```
 
-#### `isInRecommendationSection(element)`
+#### In `scanForNewPins()`:
+```javascript
+// PRIMARY CHECK: Is this pin within the board's grid container?
+if (!isInBoardGrid(container)) {
+  container.dataset.paSkipped = 'outside-grid';
+  return;
+}
+```
 
-**Two-strategy detection:**
+### H1/H2 Detection (SECONDARY - Post-Grid Only)
 
-**Strategy 1: Document-wide heading search (v12.0 - CRITICAL FOR OTHERS' BOARDS)**
-- Searches entire document for h1/h2/h3/h4 containing "more ideas", "find more", "picked for you", etc.
-- Uses `compareDocumentPosition()` to check if the pin element comes AFTER that heading in DOM order
-- Caches the heading per document to avoid repeated searches
-- **This works even when the heading is in a different DOM branch** (common on others' boards)
+As a backup, we still detect recommendation section headings, but with important safeguards:
+
+1. **Only triggers AFTER the grid container** - Uses `compareDocumentPosition()` to ensure heading comes after the grid in DOM order
+2. **Ignores headings near page top** - Skips any h1/h2 within 300px of viewport top (likely board title)
 
 ```javascript
-var recHeading = findRecHeadingInDoc(doc);  // Find "Find more ideas" h1
-if (recHeading) {
-  var position = recHeading.compareDocumentPosition(element);
-  if (position & Node.DOCUMENT_POSITION_FOLLOWING) {
-    return true;  // Pin is after the recommendation heading
+function isHeadingAfterGrid(heading) {
+  var gridContainer = getGridContainer(doc);
+  if (!gridContainer) return false;
+
+  // Must come AFTER grid in DOM order
+  var position = gridContainer.compareDocumentPosition(heading);
+  if (!(position & Node.DOCUMENT_POSITION_FOLLOWING)) {
+    return false;  // Heading is before grid - likely title
   }
+
+  // Must not be near top of page
+  if (heading.getBoundingClientRect().top < 300) {
+    return false;  // Too close to top, probably title
+  }
+
+  return true;
 }
 ```
 
-**Strategy 2: Previous sibling walk (original approach)**
-- Walks up the DOM checking previous siblings for recommendation markers
-- Text containing "more ideas", "more to explore", "picked for you", "inspired by", "you might like"
-- H1/H2/H3 headings with similar text
+### Why Grid Container Works
 
-**Why Strategy 1 was needed:**
-- On **your own boards**: Pinterest shows clear "More ideas" heading as a sibling of the pin grid
-- On **others' boards**: The heading (e.g., `<h1>Find more ideas</h1>`) is in a completely different DOM branch
-- The previous sibling walk never finds it because it's not a sibling at any ancestor level
-- `compareDocumentPosition()` works regardless of DOM structure
+1. **Structural separation** - Pinterest renders board pins in one grid, recommendations in another
+2. **Handles sections** - Distinguishes section thumbnails from actual pins using `/pin/` links
+3. **Lazy-load aware** - Re-detects grid until enough pins are loaded before caching
+4. **No text matching needed** - Works regardless of heading text or language
+5. **Fails open** - If grid can't be determined, allows pins (other checks still apply)
 
-#### Why This Works
-1. **Board pins come first** - Pinterest always shows board pins before recommendations
-2. **Buffer handles count inaccuracy** - 15% buffer accounts for Pinterest's sometimes-wrong counts
-3. **Early termination** - If recommendation heading found before cap, stops immediately
-4. **Applies to sections too** - Same logic works for both main board and section iframes
+### Filter Order
 
-### Main Board Pin Counting (v11.0 - CRITICAL FIX)
+1. **Grid container check** (PRIMARY) - Skip pins outside the board grid
+2. **H1/H2 post-grid detection** (SECONDARY) - Backup to catch recommendation sections
+3. **Stuck detection** - Stop scrolling when no new pins found
 
-When downloading sections AND main board, the cap check must only count **main board pins**, not the total of all downloaded pins (which includes section pins).
-
-#### The Bug
-```
-Section pins downloaded: 191
-Main board expected: 110 (cap: 127 with 15% buffer)
-downloadedPinIds.size = 209 (includes section pins!)
-209 >= 127 → "Reached pin cap" immediately! ❌
-```
-
-#### The Fix
-Track `pinsBeforeMainBoard` and subtract it when checking the cap:
+### Variables
 
 ```javascript
-// Set before main board download starts
-pinsBeforeMainBoard = downloadedPinIds.size;  // e.g., 191 section pins
-
-// In scanForNewPins() - count only MAIN BOARD pins against cap
-var mainBoardPinCount = downloadedPinIds.size - pinsBeforeMainBoard;
-if (expectedPinCount > 0 && mainBoardPinCount >= maxPins) {
-  return 0; // Stop collecting
-}
+var boardGridContainer = null;           // Cached grid for main board
+var iframeGridContainers = new WeakMap(); // Cached grids per iframe
 ```
 
-#### Result
-```
-mainBoardPinCount = 209 - 191 = 18 main board pins
-18 < 127 → Keep collecting! ✓
-```
+### Console Logging
 
-This ensures:
-1. Section pins don't count against main board cap
-2. Main board can collect its full allocation
-3. Each section and main board respects its own expected count 
+```
+[PA] Board has 5 sections - looking for pins grid (not sections grid)
+[PA] Found main pins grid with 45 pins
+[PA] Grid has few pins - will re-detect next scan (not caching)
+[PA] Found h1/h2 sibling divider (post-grid): More ideas
+[PA] Stopping: reached recommendations section
+``` 
 
 
 
