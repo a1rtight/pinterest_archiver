@@ -161,7 +161,20 @@
     var boardSlug = pathParts[1];
     var boardPath = '/' + username + '/' + boardSlug;
     var sectionMap = new Map();
+
+    // System routes that are NOT user sections
     var systemRoutes = ['pins', 'more_ideas', 'followers', 'activity', 'settings', 'edit', 'invite', 'organize', 'organise', 'collaborators', 'invites', 'see', 'see-pins', 'see_pins', 'ideas', 'search', 'notifications', 'messages', 'create', 'board', 'pin', 'user', 'about', 'terms', 'privacy', 'help', 'contact'];
+
+    // Check if a slug is a valid user section (not a system route or hidden)
+    function isValidSection(slug) {
+      if (!slug) return false;
+      if (systemRoutes.indexOf(slug.toLowerCase()) !== -1) return false;
+      if (slug.charAt(0) === '_') return false; // Hidden/system sections like _tools
+      if (slug.match(/^[\d]+$/)) return false; // Pure numbers (unlikely to be sections)
+      return true;
+    }
+
+    // Strategy 1: Parse JSON from script tags
     try {
       var scripts = document.querySelectorAll('script');
       scripts.forEach(function(script) {
@@ -171,8 +184,7 @@
         var match;
         while ((match = sectionPattern.exec(text)) !== null) {
           var slug = match[1];
-          if (!slug || systemRoutes.indexOf(slug) !== -1) continue;
-          if (slug.match(/^[\d]+$/) || slug.length > 100) continue;
+          if (!isValidSection(slug)) continue;
           var start = Math.max(0, match.index - 300);
           var end = Math.min(text.length, match.index + 500);
           var context = text.slice(start, end);
@@ -184,13 +196,13 @@
           if (titleMatch) name = titleMatch[1];
           if (!sectionMap.has(slug)) {
             sectionMap.set(slug, { name: name, pinCount: pinCount });
+            console.log('[PA] Found section from JSON: "' + name + '" (' + pinCount + ' pins)');
           }
         }
         var reversePattern = /"__typename"\s*:\s*"BoardSection"[^}]*?"slug"\s*:\s*"([^"]+)"/g;
         while ((match = reversePattern.exec(text)) !== null) {
           var slug = match[1];
-          if (!slug || systemRoutes.indexOf(slug) !== -1) continue;
-          if (slug.match(/^[\d]+$/) || slug.length > 100) continue;
+          if (!isValidSection(slug)) continue;
           if (!sectionMap.has(slug)) {
             var start = Math.max(0, match.index - 300);
             var end = Math.min(text.length, match.index + 500);
@@ -202,33 +214,40 @@
             var titleMatch = context.match(/"title"\s*:\s*"([^"]+)"/);
             if (titleMatch) name = titleMatch[1];
             sectionMap.set(slug, { name: name, pinCount: pinCount });
+            console.log('[PA] Found section from JSON (reverse): "' + name + '" (' + pinCount + ' pins)');
           }
         }
       });
     } catch (e) {}
+
+    // Strategy 2: Scan DOM for visible section links
+    // Only include sections that are actually rendered in visible containers
     var allLinks = document.querySelectorAll('a[href]');
     allLinks.forEach(function(link) {
       var href = link.getAttribute('href') || '';
       if (href.indexOf(boardPath + '/') === 0) {
         var remainder = href.slice(boardPath.length + 1).split('/')[0].split('?')[0];
-        if (remainder && remainder.length > 2 && remainder.length < 80) {
-          if (systemRoutes.indexOf(remainder) === -1 && !remainder.match(/^[\d]+$/)) {
-            var container = link.closest('[data-test-id]') || link.parentElement?.parentElement?.parentElement;
-            if (container) {
-              var containerText = container.textContent || '';
-              var countMatch = containerText.match(/(\d+)\s*(?:pins?|Pins?)/i);
-              if (countMatch) {
-                var pinCount = parseInt(countMatch[1], 10);
-                var name = decodeURIComponent(remainder).replace(/-/g, ' ');
-                if (!sectionMap.has(remainder)) {
-                  sectionMap.set(remainder, { name: name, pinCount: pinCount });
-                }
+        // Allow any length section name (removed length > 2 restriction)
+        if (remainder && isValidSection(remainder)) {
+          // Verify it's in a visible container (not hidden system element)
+          var container = link.closest('[data-test-id]') || link.parentElement?.parentElement?.parentElement;
+          if (container) {
+            // Check if container is visible and has pin count text
+            var containerText = container.textContent || '';
+            var countMatch = containerText.match(/(\d+)\s*(?:pins?|Pins?)/i);
+            if (countMatch) {
+              var pinCount = parseInt(countMatch[1], 10);
+              var name = decodeURIComponent(remainder).replace(/-/g, ' ');
+              if (!sectionMap.has(remainder)) {
+                sectionMap.set(remainder, { name: name, pinCount: pinCount });
+                console.log('[PA] Found section from DOM: "' + name + '" (' + pinCount + ' pins)');
               }
             }
           }
         }
       }
     });
+
     sectionMap.forEach(function(data, slug) {
       boardSections.push({
         name: data.name,
@@ -238,6 +257,7 @@
       });
     });
     boardSections.sort(function(a, b) { return a.name.localeCompare(b.name); });
+    console.log('[PA] Total sections found: ' + boardSections.length);
     return boardSections;
   }
 
@@ -743,19 +763,25 @@
   }
   // ========== END SIBLING-BASED GRID FILTERING ==========
 
-  async function fetchImage(url) {
+  // Fetch media (images, videos, GIFs)
+  async function fetchMedia(url, type) {
     try {
       var r = await fetch(url);
       if (!r.ok) throw new Error();
       return await r.arrayBuffer();
     } catch (e) {
-      try {
-        var r2 = await fetch(url.replace('/originals/', '/736x/'));
-        if (!r2.ok) throw new Error();
-        return await r2.arrayBuffer();
-      } catch (e2) { return null; }
+      // Fallback for images - try lower resolution
+      if (type === 'jpg' || !type) {
+        try {
+          var r2 = await fetch(url.replace('/originals/', '/736x/'));
+          if (!r2.ok) throw new Error();
+          return await r2.arrayBuffer();
+        } catch (e2) { return null; }
+      }
+      return null;
     }
   }
+
 
   // Scan DOM for new pins and add to queue
   // CRITICAL: Claim pin IDs immediately in downloadedPinIds to prevent duplicates with parallel workers
@@ -808,25 +834,26 @@
       var pinId = match[1];
       if (downloadedPinIds.has(pinId)) return;
 
-      // Find image - try multiple sources
-      var imgUrl = null;
-      var img = container.querySelector('img');
-      if (img) {
-        if (img.src && img.src.indexOf('pinimg.com') !== -1) imgUrl = img.src;
-        else if (img.srcset && img.srcset.indexOf('pinimg.com') !== -1) imgUrl = img.srcset.split(' ')[0];
-      }
-      if (!imgUrl) {
-        var video = container.querySelector('video[poster]');
-        if (video && video.poster && video.poster.indexOf('pinimg.com') !== -1) imgUrl = video.poster;
-      }
+      var img = container.querySelector('img[src*="pinimg.com"]');
+      if (!img) img = container.querySelector('img[srcset*="pinimg.com"]');
+      if (!img) return;
 
-      if (imgUrl && isValidPinImage(imgUrl)) {
-        downloadedPinIds.add(pinId);
-        container.dataset.paQueued = 'true';
-        fileCounter++;
-        pinQueue.push({ pinId: pinId, url: getOriginalUrl(imgUrl), element: container, fileNum: fileCounter });
-        found++;
-      }
+      var imgUrl = img.src || (img.srcset ? img.srcset.split(' ')[0] : null);
+      if (!imgUrl || !isValidPinImage(imgUrl)) return;
+
+      var origUrl = getOriginalUrl(imgUrl);
+      if (!origUrl) return;
+
+      downloadedPinIds.add(pinId);
+      container.dataset.paQueued = 'true';
+      fileCounter++;
+      pinQueue.push({
+        pinId: pinId,
+        url: origUrl,
+        element: container,
+        fileNum: fileCounter
+      });
+      found++;
     });
 
     // NOTE: Script tag scanning removed - we rely on DOM elements within board container
@@ -855,7 +882,7 @@
       activeDownloads++;
       updateLiveStats();
 
-      var data = await fetchImage(item.url);
+      var data = await fetchMedia(item.url);
       if (data) {
         downloadedFiles.push({
           name: safeName + '/' + String(item.fileNum).padStart(5, '0') + '.jpg',
@@ -991,7 +1018,7 @@
           if (downloadedPinIds.has(item.pinId)) continue; // Already claimed (from another section)
           downloadedPinIds.add(item.pinId); // CLAIM IMMEDIATELY before fetch
 
-          var data = await fetchImage(item.url);
+          var data = await fetchMedia(item.url);
           if (data) {
             sectionCounter++;
             downloadedFiles.push({
@@ -1228,19 +1255,16 @@
       // Skip if already downloaded
       if (downloadedPinIds.has(pinId)) return;
 
-      // Find image URL
-      var imgUrl = null;
-      var img = container.querySelector('img');
-      if (img) {
-        if (img.src && img.src.indexOf('pinimg.com') !== -1) imgUrl = img.src;
-        else if (img.srcset && img.srcset.indexOf('pinimg.com') !== -1) imgUrl = img.srcset.split(' ')[0];
-      }
-      if (!imgUrl) {
-        var video = container.querySelector('video[poster]');
-        if (video && video.poster && video.poster.indexOf('pinimg.com') !== -1) imgUrl = video.poster;
-      }
+      // Find image
+      var img = container.querySelector('img[src*="pinimg.com"]');
+      if (!img) img = container.querySelector('img[srcset*="pinimg.com"]');
+      if (!img) return;
 
+      var imgUrl = img.src || (img.srcset ? img.srcset.split(' ')[0] : null);
       if (!imgUrl || !isValidPinImage(imgUrl)) return;
+
+      var origUrl = getOriginalUrl(imgUrl);
+      if (!origUrl) return;
 
       // This pin was missed! Queue it for download
       console.log('[PA] Final verification: found missed pin ' + pinId);
@@ -1250,7 +1274,7 @@
       fileCounter++;
       pinQueue.push({
         pinId: pinId,
-        url: getOriginalUrl(imgUrl),
+        url: origUrl,
         element: container,
         fileNum: fileCounter
       });
@@ -1360,19 +1384,12 @@
             return;
           }
 
-          // Find image - try multiple sources
-          var imgUrl = null;
-          var img = c.querySelector('img');
-          if (img) {
-            if (img.src && img.src.indexOf('pinimg.com') !== -1) imgUrl = img.src;
-            else if (img.srcset && img.srcset.indexOf('pinimg.com') !== -1) imgUrl = img.srcset.split(' ')[0];
-          }
-          if (!imgUrl) {
-            var video = c.querySelector('video[poster]');
-            if (video && video.poster && video.poster.indexOf('pinimg.com') !== -1) imgUrl = video.poster;
-          }
-
-          if (imgUrl && isValidPinImage(imgUrl)) pinData.set(pinId, getOriginalUrl(imgUrl));
+          var img = c.querySelector('img[src*="pinimg.com"]');
+          if (!img) return;
+          var imgUrl = img.src;
+          if (!imgUrl || !isValidPinImage(imgUrl)) return;
+          var origUrl = getOriginalUrl(imgUrl);
+          if (origUrl) pinData.set(pinId, origUrl);
         });
       }
 
@@ -1412,11 +1429,16 @@
       console.log('[PA] Section "' + sectionName + '" after verification: ' + pinData.size + ' pins');
 
       var urls = [], pinIds = new Set();
-      pinData.forEach(function(url, id) { if (url) { urls.push({ url: url, pinId: id }); pinIds.add(id); } });
+      pinData.forEach(function(url, id) {
+        if (url) {
+          urls.push({ url: url, pinId: id });
+          pinIds.add(id);
+        }
+      });
       iframe.remove();
       resolve({ urls: urls, pinIds: pinIds });
     });
   }
 
   createUI();
-})(); // LATEST VERSION - v11.2 FINAL DOM VERIFICATION + ALPHANUMERIC PIN ID SUPPORT
+})(); // LATEST VERSION - v11.3 SHORT SECTION NAMES + PIN INVENTORY VERIFICATION
