@@ -123,7 +123,80 @@
     return (crc ^ 0xFFFFFFFF) >>> 0;
   }
 
-  function getBoardInfo() {
+  // Extract section pin count from BoardSectionResource JSON
+  // This is the authoritative source for section pages
+  // IMPORTANT: Must verify the JSON matches current URL (client-side nav keeps old script tags)
+  // If stale, fetches fresh HTML from server
+  async function getSectionPinCount() {
+    // Parse current URL to get expected slugs
+    var pathParts = location.pathname.split('/').filter(Boolean);
+    if (pathParts.length < 3) return null; // Not a section URL
+
+    var urlUsername = pathParts[0];
+    var urlBoardSlug = pathParts[1];
+    var urlSectionSlug = pathParts[2];
+
+    // Skip system routes - these aren't sections
+    var systemRoutes = ['pins', 'more_ideas', 'followers', 'activity', 'settings', 'edit', 'invite', 'organize'];
+    if (systemRoutes.indexOf(urlSectionSlug) !== -1) return null;
+
+    // Helper to extract pin count from HTML (document or string)
+    function extractFromScripts(scripts, username, boardSlug, sectionSlug) {
+      for (var i = 0; i < scripts.length; i++) {
+        try {
+          var scriptContent = scripts[i].textContent || scripts[i];
+          var json = JSON.parse(scriptContent);
+          if (json.resource && json.resource.name === 'BoardSectionResource') {
+            var opts = json.resource.options || {};
+            if (opts.username === username &&
+                opts.board_slug === boardSlug &&
+                opts.section_slug === sectionSlug) {
+              var data = json.resource_response && json.resource_response.data;
+              if (data && data.type === 'board_section' && typeof data.pin_count === 'number') {
+                return data.pin_count;
+              }
+            }
+          }
+        } catch (e) { /* ignore parse errors */ }
+      }
+      return null;
+    }
+
+    // Try current DOM first
+    var scripts = document.querySelectorAll('script[data-test-id="resource-response-data"]');
+    var count = extractFromScripts(scripts, urlUsername, urlBoardSlug, urlSectionSlug);
+    if (count !== null) {
+      console.log('[PA] Found section pin count from DOM: ' + count);
+      return count;
+    }
+
+    // DOM data is stale - fetch fresh HTML
+    console.log('[PA] DOM data stale, fetching fresh page data...');
+    try {
+      var response = await fetch(location.href);
+      var html = await response.text();
+
+      // Parse the HTML to extract script contents
+      var scriptMatches = html.match(/<script[^>]*data-test-id="resource-response-data"[^>]*>([^<]+)<\/script>/g);
+      if (scriptMatches) {
+        var scriptContents = scriptMatches.map(function(s) {
+          var match = s.match(/>([^<]+)</);
+          return match ? match[1] : '';
+        });
+        count = extractFromScripts(scriptContents, urlUsername, urlBoardSlug, urlSectionSlug);
+        if (count !== null) {
+          console.log('[PA] Found section pin count from fetched HTML: ' + count);
+          return count;
+        }
+      }
+    } catch (e) {
+      console.log('[PA] Failed to fetch fresh page data:', e);
+    }
+
+    return null;
+  }
+
+  async function getBoardInfo() {
     var selectors = ['[data-test-id="board-name"]', 'h1', '[role="heading"]'];
     for (var i = 0; i < selectors.length; i++) {
       var el = document.querySelector(selectors[i]);
@@ -132,12 +205,20 @@
         break;
       }
     }
-    var pc = document.querySelector('[data-test-id="pin-count"]');
-    if (pc) {
-      var m = pc.textContent.match(/[\d,]+/);
-      if (m) totalPins = parseInt(m[0].replace(/,/g, ''), 10);
+
+    // Try section pin count first (from BoardSectionResource JSON)
+    var sectionPinCount = await getSectionPinCount();
+    if (sectionPinCount !== null) {
+      totalPins = sectionPinCount;
+    } else {
+      // Fall back to DOM-based detection for main board
+      var pc = document.querySelector('[data-test-id="pin-count"]');
+      if (pc) {
+        var m = pc.textContent.match(/[\d,]+/);
+        if (m) totalPins = parseInt(m[0].replace(/,/g, ''), 10);
+      }
+      if (!totalPins) totalPins = document.querySelectorAll('[data-test-id="pin"]').length || 0;
     }
-    if (!totalPins) totalPins = document.querySelectorAll('[data-test-id="pin"]').length || 0;
     if (!boardName) {
       var p = location.pathname.split('/').filter(Boolean);
       boardName = p[p.length - 1] || 'board';
@@ -282,7 +363,7 @@
   }
 
   async function createUI() {
-    var info = getBoardInfo();
+    var info = await getBoardInfo();
     safeName = boardName.replace(/[^a-zA-Z0-9]/g, '_');
     var overlay = document.createElement('div');
     overlay.id = 'pa-overlay';
@@ -1464,4 +1545,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v11.3 SHORT SECTION NAMES + PIN INVENTORY VERIFICATION
+})(); // LATEST VERSION - v11.6 SECTION PIN COUNT FIX (fetch fresh HTML if stale)

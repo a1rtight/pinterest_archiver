@@ -185,6 +185,50 @@ Three strategies are used to find board sections:
 3. Runs `detectSections()` again after scrolling
 4. Returns to original scroll position
 
+### Section Pin Count Detection (v11.6)
+
+**Problem**: When navigating to a section page via client-side routing (clicking links within Pinterest), the `<script data-test-id="resource-response-data">` tags contain stale JSON from the previous page. There's also no visible pin count text in the UI on section pages.
+
+**Solution**: `getSectionPinCount()` uses a two-step approach:
+
+#### Step 1: Check DOM with URL Validation
+```javascript
+// Parse current URL to get expected slugs
+var urlUsername = pathParts[0];
+var urlBoardSlug = pathParts[1];
+var urlSectionSlug = pathParts[2];
+
+// Only use JSON if it matches current URL
+if (opts.username === urlUsername &&
+    opts.board_slug === urlBoardSlug &&
+    opts.section_slug === urlSectionSlug) {
+  return data.pin_count;  // Fresh data - use it
+}
+```
+
+#### Step 2: Fetch Fresh HTML if Stale
+```javascript
+// DOM data is stale - fetch fresh HTML
+var response = await fetch(location.href);
+var html = await response.text();
+
+// Parse BoardSectionResource from fetched HTML
+var scriptMatches = html.match(/<script[^>]*data-test-id="resource-response-data"[^>]*>([^<]+)<\/script>/g);
+// Extract and parse JSON to get pin_count
+```
+
+#### Why This Works
+- **Hard refresh**: DOM has fresh JSON matching URL → uses Step 1
+- **Client-side navigation**: DOM has stale JSON → Step 1 fails validation → Step 2 fetches fresh data
+- **Authoritative source**: `BoardSectionResource` JSON contains exact `pin_count` from Pinterest's API
+
+#### Console Logging
+```
+[PA] Found section pin count from DOM: 22          // Step 1 succeeded
+[PA] DOM data stale, fetching fresh page data...   // Step 1 failed, trying Step 2
+[PA] Found section pin count from fetched HTML: 22 // Step 2 succeeded
+```
+
 ### Pin Collection (`scrollAndCollect()`)
 
 1. Scrolls to top of page
