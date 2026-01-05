@@ -22,6 +22,10 @@
   var fileCounter = 0;
   var safeName = '';
 
+  // URL watching for dynamic UI updates
+  var currentUrl = location.href;
+  var urlWatchInterval = null;
+
   var s = document.createElement('style');
   s.id = 'pa-styles';
   s.textContent = '#pa-overlay{position:fixed;top:20px;right:20px;width:340px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.2);z-index:999999;font-family:system-ui,sans-serif;color:#333;max-height:90vh;overflow:auto}#pa-overlay *{box-sizing:border-box}.pa-h{padding:16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}.pa-h h2{margin:0;font-size:16px}.pa-x{background:none;border:none;font-size:20px;cursor:pointer;color:#666}.pa-c{padding:16px}.pa-i{margin-bottom:16px}.pa-n{font-size:18px;font-weight:600;margin-bottom:4px}.pa-p{font-size:14px;color:#666}.pa-t{font-size:12px;color:#888;margin:12px 0 8px;text-transform:uppercase}.pa-b{display:block;width:100%;padding:12px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;background:#fff;font-size:14px;cursor:pointer}.pa-b:hover{background:#f5f5f5}.pa-b:disabled{opacity:.5}.pa-bp{background:#e60023;color:#fff;border-color:#e60023}.pa-bp:hover{background:#ad081b}.pa-bg{background:#28a745;color:#fff;border-color:#28a745}.pa-bg:hover{background:#218838}.pa-by{background:#ffc107;color:#333;border-color:#ffc107}.pa-by:hover{background:#e0a800}.pa-r{display:flex;gap:8px}.pa-r .pa-b{flex:1;margin:0}.pa-s{padding:12px;background:#f8f8f8;border-radius:8px;font-size:13px;color:#666;margin-top:12px;display:none}.pa-s.on{display:block}.pa-g{height:4px;background:#eee;border-radius:2px;margin-top:8px}.pa-gb{height:100%;background:#e60023;width:0;transition:width .3s}.pa-m{background:#fff3cd;padding:10px;border-radius:8px;font-size:12px;margin-top:12px;display:none}.pa-m.on{display:block}@keyframes pa-spin{to{transform:rotate(360deg)}}.pa-live{display:inline-block;width:8px;height:8px;background:#28a745;border-radius:50%;margin-right:6px;animation:pa-pulse 1s infinite}.pa-paused{background:#ffc107;animation:none}@keyframes pa-pulse{0%,100%{opacity:1}50%{opacity:0.5}}';
@@ -362,6 +366,189 @@
     return d.innerHTML;
   }
 
+  // Update the UI info panel when URL changes (dynamic navigation)
+  async function updateUIForNewPage() {
+    // Always reset on page change - stop any in-progress download
+    scrollAbort = true;
+
+    // Reset state for new page
+    boardSections = [];
+    currentSection = null;
+    totalPins = 0;
+    boardName = '';
+
+    // Get new page info
+    var info = await getBoardInfo();
+    safeName = boardName.replace(/[^a-zA-Z0-9]/g, '_');
+
+    // Update the info panel
+    var infoPanel = document.querySelector('#pa-overlay .pa-i');
+    if (infoPanel) {
+      var html = '<div class="pa-n">' + esc(info.n) + '</div>';
+      if (info.section) {
+        html += '<div class="pa-p" style="color:#e60023">Section: ' + esc(info.section) + '</div>';
+      }
+      html += '<div class="pa-p">' + info.t.toLocaleString() + ' pins</div>';
+      infoPanel.innerHTML = html;
+    }
+
+    // Update sections panel
+    var sectionsPanel = document.getElementById('pa-sections-panel');
+    if (sectionsPanel) {
+      if (info.section) {
+        // On a section page - hide sections panel
+        sectionsPanel.innerHTML = '';
+      } else {
+        // On main board - show loading and detect sections
+        sectionsPanel.innerHTML = '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">' +
+          '<div style="font-weight:600;font-size:13px;margin-bottom:8px">Sections</div>' +
+          '<div style="color:#888;font-size:12px;padding:8px 0;text-align:center">' +
+          '<div style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#e60023;border-radius:50%;animation:pa-spin 1s linear infinite;margin-right:8px;vertical-align:middle"></div>' +
+          'Loading sections...</div></div>';
+
+        // Detect sections and update panel
+        var sections = await detectSectionsAsync();
+        updateSectionsPanelContent(sections, info);
+      }
+    }
+
+    // Reset download state for new page
+    isPlaying = false;
+    isPaused = false;
+    scrollAbort = false;
+    downloadedFiles = [];
+    downloadedPinIds = new Set();
+    pinQueue = [];
+    fileCounter = 0;
+    activeDownloads = 0;
+    boardGridContainer = null;
+    reachedRecommendations = false;
+
+    // Update progress bar area
+    var dlCount = document.getElementById('pa-dl-count');
+    if (dlCount) dlCount.textContent = '0 downloaded';
+
+    var dlBar = document.getElementById('pa-dl-bar');
+    if (dlBar) dlBar.style.width = '0%';
+
+    // Update total pins display
+    var dlTotal = document.getElementById('pa-dl-total');
+    if (dlTotal) dlTotal.textContent = info.t + ' total';
+
+    // Reset play/pause buttons
+    var playBtn = document.getElementById('pa-play');
+    var pauseBtn = document.getElementById('pa-pause');
+    if (playBtn) {
+      playBtn.disabled = false;
+      playBtn.textContent = '▶ Play';
+    }
+    if (pauseBtn) {
+      pauseBtn.disabled = true;
+    }
+
+    // Hide live status
+    var liveStatus = document.getElementById('pa-live-status');
+    if (liveStatus) liveStatus.style.display = 'none';
+
+    // Reset status area
+    var statusArea = document.getElementById('pa-s');
+    var statusText = document.getElementById('pa-st');
+    var progressBar = document.getElementById('pa-gb');
+    if (statusArea) statusArea.classList.remove('on');
+    if (statusText) statusText.textContent = 'Ready';
+    if (progressBar) progressBar.style.width = '0%';
+
+    // Hide message area
+    var msgArea = document.getElementById('pa-m');
+    if (msgArea) msgArea.classList.remove('on');
+
+    console.log('[PA] UI updated for: ' + location.pathname);
+  }
+
+  // Helper to update sections panel content (extracted from createUI)
+  function updateSectionsPanelContent(sections, info) {
+    var panel = document.getElementById('pa-sections-panel');
+    if (!panel) return;
+    if (info.section) { panel.innerHTML = ''; return; }
+
+    var sectionPinTotal = sections.reduce(function(sum, sec) { return sum + (sec.pinCount || 0); }, 0);
+    var mainPinCount = Math.max(0, info.t - sectionPinTotal);
+
+    var html = '';
+    if (sections.length > 0) {
+      html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+      html += '<label style="display:flex;align-items:center;cursor:pointer;font-weight:600;font-size:13px">';
+      html += '<input type="checkbox" id="pa-select-all-sections" checked style="margin-right:6px">';
+      html += '<span>Sections (' + sectionPinTotal + ' pins)</span></label>';
+      html += '<button id="pa-scan-sections" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer">Scan Again</button>';
+      html += '</div>';
+      html += '<div style="max-height:180px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;background:#fff">';
+      sections.forEach(function(sec, idx) {
+        html += '<label style="display:flex;align-items:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:12px">';
+        html += '<input type="checkbox" class="pa-section-cb" data-idx="' + idx + '" checked style="margin-right:8px">';
+        html += '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(sec.name) + '</span>';
+        if (sec.pinCount > 0) html += '<span style="color:#888;font-size:11px;margin-left:8px">' + sec.pinCount + ' pins</span>';
+        html += '</label>';
+      });
+      html += '</div></div>';
+    } else {
+      html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
+      html += '<div style="display:flex;justify-content:space-between;align-items:center">';
+      html += '<span style="font-weight:600;font-size:13px;color:#888">No sections found</span>';
+      html += '<button id="pa-scan-sections" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer">Scan Again</button>';
+      html += '</div></div>';
+    }
+
+    html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
+    html += '<label style="display:flex;align-items:center;cursor:pointer;font-weight:600;font-size:13px">';
+    html += '<input type="checkbox" class="pa-section-cb" data-main="true" checked style="margin-right:6px">';
+    html += '<span>Main board (' + mainPinCount + ' pins)</span></label></div>';
+
+    panel.innerHTML = html;
+
+    // Re-attach event listeners
+    var scanBtn = document.getElementById('pa-scan-sections');
+    if (scanBtn) {
+      scanBtn.onclick = async function() {
+        scanBtn.disabled = true;
+        scanBtn.textContent = 'Scanning...';
+        await detectSectionsAsync();
+        updateSectionsPanelContent(boardSections, info);
+      };
+    }
+
+    var selectAllCb = document.getElementById('pa-select-all-sections');
+    if (selectAllCb) {
+      selectAllCb.onchange = function() {
+        document.querySelectorAll('.pa-section-cb[data-idx]').forEach(function(cb) {
+          cb.checked = selectAllCb.checked;
+        });
+      };
+    }
+  }
+
+  // Start watching for URL changes
+  function startUrlWatcher() {
+    if (urlWatchInterval) return;
+    currentUrl = location.href;
+    urlWatchInterval = setInterval(function() {
+      if (location.href !== currentUrl) {
+        console.log('[PA] URL changed: ' + currentUrl + ' -> ' + location.href);
+        currentUrl = location.href;
+        updateUIForNewPage();
+      }
+    }, 500);
+  }
+
+  // Stop watching for URL changes
+  function stopUrlWatcher() {
+    if (urlWatchInterval) {
+      clearInterval(urlWatchInterval);
+      urlWatchInterval = null;
+    }
+  }
+
   async function createUI() {
     var info = await getBoardInfo();
     safeName = boardName.replace(/[^a-zA-Z0-9]/g, '_');
@@ -404,7 +591,7 @@
     html += '<div style="margin-bottom:12px">';
     html += '<div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px">';
     html += '<span id="pa-dl-count">0 downloaded</span>';
-    html += '<span>' + info.t + ' total</span>';
+    html += '<span id="pa-dl-total">' + info.t + ' total</span>';
     html += '</div>';
     html += '<div style="height:12px;background:#e0e0e0;border-radius:6px;overflow:hidden">';
     html += '<div id="pa-dl-bar" style="height:100%;background:linear-gradient(90deg,#28a745,#20c997);width:0%;transition:width 0.3s"></div>';
@@ -420,6 +607,7 @@
     document.getElementById('pa-x').onclick = function() {
       scrollAbort = true;
       isPaused = true;
+      stopUrlWatcher();
       overlay.remove();
     };
 
@@ -487,6 +675,9 @@
       var sections = await detectSectionsAsync();
       updateSectionsPanel(sections);
     }
+
+    // Start watching for URL changes (client-side navigation)
+    startUrlWatcher();
   }
 
   function stat(text, progress) {
@@ -1545,4 +1736,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v11.6 SECTION PIN COUNT FIX (fetch fresh HTML if stale)
+})(); // LATEST VERSION - v12.3 DYNAMIC UI (complete reset on page change)
