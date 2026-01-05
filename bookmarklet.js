@@ -927,6 +927,14 @@
     await sleep(150);
 
     while (isPlaying && !isPaused && !scrollAbort) {
+      // Stop immediately if we hit the target pin count
+      var mainBoardPinsClaimed = downloadedPinIds.size - pinsBeforeMainBoard;
+      if (expectedPinCount > 0 && mainBoardPinsClaimed >= expectedPinCount) {
+        stat('Target reached: ' + expectedPinCount + ' pins', 1);
+        console.log('[PA] Target reached: ' + mainBoardPinsClaimed + '/' + expectedPinCount + ' - stopping immediately');
+        break;
+      }
+
       // Stop if we reached recommendations (grid container filtering is primary)
       if (reachedRecommendations) {
         stat('Reached recommendations section', 1);
@@ -1057,6 +1065,7 @@
       // CRITICAL: Track how many pins were downloaded BEFORE main board
       // So we only count MAIN BOARD pins against the cap, not section pins
       pinsBeforeMainBoard = downloadedPinIds.size;
+      var filesBeforeMainBoard = downloadedFiles.length;
 
       console.warn('[PA] Main board: expecting ~' + expectedPinCount + ' pins (total: ' + totalPins + ' - sections: ' + sectionPinTotal + ')');
       console.warn('[PA] Pins already downloaded (sections): ' + pinsBeforeMainBoard);
@@ -1081,6 +1090,12 @@
       await waitForWorkers();
 
       // FINAL SWEEP: Multiple passes to catch ALL lazy-loaded board pins
+      // Skip if we already have all expected pins
+      var mainBoardDownloaded = downloadedFiles.length - filesBeforeMainBoard;
+      if (mainBoardDownloaded >= expectedPinCount && expectedPinCount > 0) {
+        console.log('[PA] Already have all ' + expectedPinCount + ' pins - skipping final sweep');
+        stat('All ' + expectedPinCount + ' pins collected', 1);
+      } else {
       // Pinterest lazy-loads images - need to scroll multiple times to trigger all loading
       // Grid container filtering is primary, recommendation detection is backup
       stat('Final sweep for missed pins...', 0.95);
@@ -1131,10 +1146,12 @@
       }
 
       stat('Finishing downloads...', 0.99);
+      } // end else (final sweep)
     }
 
     // VERIFICATION: Check for any pins missed by DOM scanning
-    if (!isPaused && totalPins > 0) {
+    // Skip if we already have all expected pins
+    if (!isPaused && totalPins > 0 && downloadedFiles.length < totalPins) {
       // First try JSON inventory
       await verifyAndDownloadMissing(totalPins);
 
