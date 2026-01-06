@@ -28,7 +28,7 @@
 
   var s = document.createElement('style');
   s.id = 'pa-styles';
-  s.textContent = '#pa-overlay{position:fixed;top:20px;right:20px;width:340px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.2);z-index:999999;font-family:system-ui,sans-serif;color:#333;max-height:90vh;overflow:auto}#pa-overlay *{box-sizing:border-box}.pa-h{padding:16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}.pa-h h2{margin:0;font-size:16px}.pa-x{background:none;border:none;font-size:20px;cursor:pointer;color:#666}.pa-c{padding:16px}.pa-i{margin-bottom:16px}.pa-n{font-size:18px;font-weight:600;margin-bottom:4px}.pa-p{font-size:14px;color:#666}.pa-t{font-size:12px;color:#888;margin:12px 0 8px;text-transform:uppercase}.pa-b{display:block;width:100%;padding:12px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;background:#fff;font-size:14px;cursor:pointer}.pa-b:hover{background:#f5f5f5}.pa-b:disabled{opacity:.5}.pa-bp{background:#e60023;color:#fff;border-color:#e60023}.pa-bp:hover{background:#ad081b}.pa-bg{background:#28a745;color:#fff;border-color:#28a745}.pa-bg:hover{background:#218838}.pa-by{background:#ffc107;color:#333;border-color:#ffc107}.pa-by:hover{background:#e0a800}.pa-r{display:flex;gap:8px}.pa-r .pa-b{flex:1;margin:0}.pa-s{padding:12px;background:#f8f8f8;border-radius:8px;font-size:13px;color:#666;margin-top:12px;display:none}.pa-s.on{display:block}.pa-g{height:4px;background:#eee;border-radius:2px;margin-top:8px}.pa-gb{height:100%;background:#e60023;width:0;transition:width .3s}.pa-m{background:#fff3cd;padding:10px;border-radius:8px;font-size:12px;margin-top:12px;display:none}.pa-m.on{display:block}@keyframes pa-spin{to{transform:rotate(360deg)}}.pa-live{display:inline-block;width:8px;height:8px;background:#28a745;border-radius:50%;margin-right:6px;animation:pa-pulse 1s infinite}.pa-paused{background:#ffc107;animation:none}@keyframes pa-pulse{0%,100%{opacity:1}50%{opacity:0.5}}';
+  s.textContent = '#pa-overlay{position:fixed;top:20px;right:20px;width:340px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.2);z-index:999999;font-family:system-ui,sans-serif;color:#333;max-height:90vh;overflow:auto}#pa-sections-panel{transition:height 0.25s ease;overflow:hidden}#pa-sections-content{height:290px;overflow-y:auto}.pa-credit{padding:12px 16px;border-top:1px solid #eee}#pa-overlay *{box-sizing:border-box}.pa-h{padding:16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}.pa-h h2{margin:0;font-size:16px}.pa-x{background:none;border:none;font-size:20px;cursor:pointer;color:#666}.pa-c{padding:16px}.pa-i{margin-bottom:16px}.pa-n{font-size:18px;font-weight:600;margin-bottom:4px}.pa-p{font-size:14px;color:#666}.pa-t{font-size:12px;color:#888;margin:12px 0 8px;text-transform:uppercase}.pa-b{display:block;width:100%;padding:12px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;background:#fff;font-size:14px;cursor:pointer}.pa-b:hover{background:#f5f5f5}.pa-b:disabled{opacity:.5}.pa-bp{background:#e60023;color:#fff;border-color:#e60023}.pa-bp:hover{background:#ad081b}.pa-bg{background:#28a745;color:#fff;border-color:#28a745}.pa-bg:hover{background:#218838}.pa-by{background:#ffc107;color:#333;border-color:#ffc107}.pa-by:hover{background:#e0a800}.pa-r{display:flex;gap:8px}.pa-r .pa-b{flex:1;margin:0}.pa-s{padding:12px;background:#f8f8f8;border-radius:8px;font-size:13px;color:#666;margin-top:12px;display:none}.pa-s.on{display:block}.pa-g{height:4px;background:#eee;border-radius:2px;margin-top:8px}.pa-gb{height:100%;background:#e60023;width:0;transition:width .3s}.pa-m{background:#fff3cd;padding:10px;border-radius:8px;font-size:12px;margin-top:12px;display:none}.pa-m.on{display:block}@keyframes pa-spin{to{transform:rotate(360deg)}}.pa-live{display:inline-block;width:8px;height:8px;background:#28a745;border-radius:50%;margin-right:6px;animation:pa-pulse 1s infinite}.pa-paused{background:#ffc107;animation:none}@keyframes pa-pulse{0%,100%{opacity:1}50%{opacity:0.5}}';
   document.head.appendChild(s);
 
   function createZip(files) {
@@ -371,13 +371,57 @@
     // Always reset on page change - stop any in-progress download
     scrollAbort = true;
 
-    // Reset state for new page
+    var sectionsPanel = document.getElementById('pa-sections-panel');
+
+    // Determine page type from URL SYNCHRONOUSLY (no async wait)
+    var pathParts = location.pathname.split('/').filter(Boolean);
+    var systemRoutes = ['pins', 'more_ideas', 'followers', 'activity', 'settings', 'edit', 'invite', 'organize'];
+    var isGoingToSection = pathParts.length >= 3 && systemRoutes.indexOf(pathParts[2]) === -1;
+
+    // Lock current height and start animation IMMEDIATELY
+    if (sectionsPanel) {
+      var oldSectionHeight = sectionsPanel.offsetHeight;
+      sectionsPanel.style.height = oldSectionHeight + 'px';
+
+      if (isGoingToSection) {
+        // SHRINKING: Animate to 0 immediately
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            sectionsPanel.style.height = '0px';
+            setTimeout(function() {
+              sectionsPanel.innerHTML = '';
+              sectionsPanel.style.height = 'auto';
+            }, 250);
+          });
+        });
+      } else {
+        // EXPANDING: Show fixed-height container with loading spinner
+        sectionsPanel.innerHTML = '<div id="pa-sections-content">' +
+          '<div style="height:100%;display:flex;align-items:center;justify-content:center">' +
+          '<div style="text-align:center;color:#888;font-size:12px">' +
+          '<div style="display:inline-block;width:20px;height:20px;border:2px solid #ddd;border-top-color:#e60023;border-radius:50%;animation:pa-spin 1s linear infinite;margin-bottom:8px"></div>' +
+          '<div>Loading sections...</div></div></div></div>';
+
+        sectionsPanel.style.height = oldSectionHeight + 'px';
+        var targetHeight = sectionsPanel.scrollHeight;
+
+        requestAnimationFrame(function() {
+          requestAnimationFrame(function() {
+            sectionsPanel.style.height = targetHeight + 'px';
+            setTimeout(function() {
+              sectionsPanel.style.height = 'auto';
+            }, 250);
+          });
+        });
+      }
+    }
+
+    // Now do async work (animation already started)
     boardSections = [];
     currentSection = null;
     totalPins = 0;
     boardName = '';
 
-    // Get new page info
     var info = await getBoardInfo();
     safeName = boardName.replace(/[^a-zA-Z0-9]/g, '_');
 
@@ -392,24 +436,10 @@
       infoPanel.innerHTML = html;
     }
 
-    // Update sections panel
-    var sectionsPanel = document.getElementById('pa-sections-panel');
-    if (sectionsPanel) {
-      if (info.section) {
-        // On a section page - hide sections panel
-        sectionsPanel.innerHTML = '';
-      } else {
-        // On main board - show loading and detect sections
-        sectionsPanel.innerHTML = '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">' +
-          '<div style="font-weight:600;font-size:13px;margin-bottom:8px">Sections</div>' +
-          '<div style="color:#888;font-size:12px;padding:8px 0;text-align:center">' +
-          '<div style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#e60023;border-radius:50%;animation:pa-spin 1s linear infinite;margin-right:8px;vertical-align:middle"></div>' +
-          'Loading sections...</div></div>';
-
-        // Detect sections and update panel
-        var sections = await detectSectionsAsync();
-        updateSectionsPanelContent(sections, info);
-      }
+    // For main board, detect and update sections (content swap only, no animation)
+    if (!isGoingToSection && sectionsPanel) {
+      var sections = await detectSectionsAsync();
+      updateSectionsPanelContent(sections, info);
     }
 
     // Reset download state for new page
@@ -474,7 +504,7 @@
     var sectionPinTotal = sections.reduce(function(sum, sec) { return sum + (sec.pinCount || 0); }, 0);
     var mainPinCount = Math.max(0, info.t - sectionPinTotal);
 
-    var html = '';
+    var html = '<div id="pa-sections-content">';
     if (sections.length > 0) {
       html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
       html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
@@ -483,7 +513,7 @@
       html += '<span>Sections (' + sectionPinTotal + ' pins)</span></label>';
       html += '<button id="pa-scan-sections" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer">Scan Again</button>';
       html += '</div>';
-      html += '<div style="max-height:180px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;background:#fff">';
+      html += '<div style="max-height:170px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;background:#fff">';
       sections.forEach(function(sec, idx) {
         html += '<label style="display:flex;align-items:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:12px">';
         html += '<input type="checkbox" class="pa-section-cb" data-idx="' + idx + '" checked style="margin-right:8px">';
@@ -504,6 +534,7 @@
     html += '<label style="display:flex;align-items:center;cursor:pointer;font-weight:600;font-size:13px">';
     html += '<input type="checkbox" class="pa-section-cb" data-main="true" checked style="margin-right:6px">';
     html += '<span>Main board (' + mainPinCount + ' pins)</span></label></div>';
+    html += '</div>'; // Close #pa-sections-content
 
     panel.innerHTML = html;
 
@@ -562,11 +593,11 @@
     html += '<div class="pa-p">' + info.t.toLocaleString() + ' pins</div></div>';
     html += '<div id="pa-sections-panel">';
     if (!info.section) {
-      html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
-      html += '<div style="font-weight:600;font-size:13px;margin-bottom:8px">Sections</div>';
-      html += '<div style="color:#888;font-size:12px;padding:8px 0;text-align:center">';
-      html += '<div style="display:inline-block;width:16px;height:16px;border:2px solid #ddd;border-top-color:#e60023;border-radius:50%;animation:pa-spin 1s linear infinite;margin-right:8px;vertical-align:middle"></div>';
-      html += 'Loading sections...</div></div>';
+      html += '<div id="pa-sections-content">';
+      html += '<div style="height:100%;display:flex;align-items:center;justify-content:center">';
+      html += '<div style="text-align:center;color:#888;font-size:12px">';
+      html += '<div style="display:inline-block;width:20px;height:20px;border:2px solid #ddd;border-top-color:#e60023;border-radius:50%;animation:pa-spin 1s linear infinite;margin-bottom:8px"></div>';
+      html += '<div>Loading sections...</div></div></div></div>';
     }
     html += '</div>';
     html += '<div id="pa-btns">';
@@ -600,7 +631,8 @@
     html += '</div><div class="pa-s" id="pa-s"><span id="pa-st">Ready</span>';
     html += '<div class="pa-g"><div class="pa-gb" id="pa-gb"></div></div></div>';
     html += '<div class="pa-m" id="pa-m"></div>';
-    html += '<div style="margin-top:12px;padding-top:12px;border-top:1px solid #eee;font-size:13px;color:#666">Author: <a href="https://www.jbrandford.com" target="_blank" style="color:#e60023;text-decoration:none"><svg width="14" height="14" viewBox="0 0 14 14" style="vertical-align:-2px;margin-right:4px"><circle cx="7" cy="7" r="7" fill="#e60023"/></svg>J.Brandford</a></div></div>';
+    html += '</div>'; // Close .pa-c
+    html += '<div class="pa-credit" style="font-size:13px;color:#666">Author: <a href="https://www.jbrandford.com" target="_blank" style="color:#e60023;text-decoration:none"><svg width="14" height="14" viewBox="0 0 14 14" style="vertical-align:-2px;margin-right:4px"><circle cx="7" cy="7" r="7" fill="#e60023"/></svg>J.Brandford</a></div>';
     overlay.innerHTML = html;
     document.body.appendChild(overlay);
 
@@ -625,7 +657,7 @@
       if (info.section) { panel.innerHTML = ''; return; }
       var sectionPinTotal = sections.reduce(function(sum, sec) { return sum + (sec.pinCount || 0); }, 0);
       var mainPinCount = Math.max(0, info.t - sectionPinTotal);
-      var html = '';
+      var html = '<div id="pa-sections-content">';
       if (sections.length > 0) {
         html += '<div style="margin:12px 0;padding:10px;background:#f8f8f8;border-radius:8px">';
         html += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
@@ -634,7 +666,7 @@
         html += '<span>Sections (' + sectionPinTotal + ' pins)</span></label>';
         html += '<button id="pa-scan-sections" style="font-size:11px;padding:4px 8px;border:1px solid #ddd;border-radius:4px;background:#fff;cursor:pointer">Scan Again</button>';
         html += '</div>';
-        html += '<div style="max-height:180px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;background:#fff">';
+        html += '<div style="max-height:170px;overflow-y:auto;border:1px solid #e0e0e0;border-radius:4px;background:#fff">';
         sections.forEach(function(sec, idx) {
           html += '<label style="display:flex;align-items:center;padding:6px 8px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:12px">';
           html += '<input type="checkbox" class="pa-section-cb" data-idx="' + idx + '" checked style="margin-right:8px">';
@@ -654,6 +686,7 @@
       html += '<label style="display:flex;align-items:center;cursor:pointer;font-weight:600;font-size:13px">';
       html += '<input type="checkbox" class="pa-section-cb" data-main="true" checked style="margin-right:6px">';
       html += '<span>Main board (' + mainPinCount + ' pins)</span></label></div>';
+      html += '</div>'; // Close #pa-sections-content
       panel.innerHTML = html;
       var scanBtn = document.getElementById('pa-scan-sections');
       if (scanBtn) {
@@ -1736,4 +1769,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v12.3 DYNAMIC UI (complete reset on page change)
+})(); // LATEST VERSION - v13.1 DYNAMIC UI (fixed 290px sections container)

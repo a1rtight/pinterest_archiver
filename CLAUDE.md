@@ -326,6 +326,131 @@ BoardName/
 - **Status Area**: Progress bar and status text
 - **Message Area**: Warnings and completion info
 
+## Dynamic UI & Animation System (v13.1)
+
+The widget updates dynamically when navigating between pages via Pinterest's client-side routing, with smooth animations for the sections panel.
+
+### URL Watching
+
+```javascript
+var currentUrl = location.href;
+var urlWatchInterval = null;
+
+function startUrlWatcher() {
+  urlWatchInterval = setInterval(function() {
+    if (location.href !== currentUrl) {
+      currentUrl = location.href;
+      updateUIForNewPage();  // Triggers UI update + animation
+    }
+  }, 500);  // Poll every 500ms
+}
+```
+
+### UI Structure
+
+```
+#pa-overlay (fixed position widget)
+├── .pa-h (header - sticky)
+├── .pa-c (content container)
+│   ├── .pa-i (info panel - board name, pin count)
+│   ├── #pa-sections-panel (animated container)
+│   │   └── #pa-sections-content (fixed 290px height)
+│   │       ├── Sections list (max-height: 170px, scrollable)
+│   │       └── Main board checkbox
+│   ├── #pa-btns (download controls)
+│   ├── #pa-live-status (live download stats)
+│   └── .pa-s (status area)
+└── .pa-credit (author credit)
+```
+
+### Sections Panel Animation
+
+The sections panel uses CSS height transitions for smooth expand/collapse:
+
+```css
+#pa-sections-panel {
+  transition: height 0.25s ease;
+  overflow: hidden;
+}
+
+#pa-sections-content {
+  height: 290px;      /* Fixed height - fits ~5.5 section items */
+  overflow-y: auto;
+}
+```
+
+#### Fixed Height Breakdown (290px)
+- **Sections list**: `max-height: 170px` (~5.5 items × 31px each)
+- **Header area**: ~50px (checkbox, "Sections" label, scan button)
+- **Main board checkbox**: ~58px
+- **Margins**: ~12px
+
+### Animation Behavior
+
+#### Expanding (Section → Main Board)
+1. Detect page type from URL **synchronously** (no async wait)
+2. Show `#pa-sections-content` with centered loading spinner
+3. Animate `#pa-sections-panel` from `0px` → `290px` immediately
+4. Load sections async in background
+5. Swap content when ready (no second animation - height already set)
+
+```javascript
+// Synchronous page type detection from URL
+var pathParts = location.pathname.split('/').filter(Boolean);
+var systemRoutes = ['pins', 'more_ideas', 'followers', ...];
+var isGoingToSection = pathParts.length >= 3 &&
+                       systemRoutes.indexOf(pathParts[2]) === -1;
+
+// Animate IMMEDIATELY (before any async work)
+sectionsPanel.style.height = oldSectionHeight + 'px';
+requestAnimationFrame(function() {
+  requestAnimationFrame(function() {
+    sectionsPanel.style.height = targetHeight + 'px';
+  });
+});
+```
+
+#### Shrinking (Main Board → Section)
+1. Detect section page from URL synchronously
+2. Keep existing content during animation
+3. Animate `#pa-sections-panel` from `290px` → `0px`
+4. Clear content **after** animation completes (250ms)
+
+```javascript
+if (isGoingToSection) {
+  requestAnimationFrame(function() {
+    requestAnimationFrame(function() {
+      sectionsPanel.style.height = '0px';
+      setTimeout(function() {
+        sectionsPanel.innerHTML = '';  // Clear AFTER animation
+        sectionsPanel.style.height = 'auto';
+      }, 250);
+    });
+  });
+}
+```
+
+### Key Animation Rules
+
+1. **Instant detection** - Page type determined from URL path, not async data
+2. **Animation first** - Height transition starts before any `await` calls
+3. **Fixed target height** - Always animates to 290px (not measured dynamically)
+4. **Content after animation** - Sections load while/after animation plays
+5. **Double RAF** - Uses `requestAnimationFrame` twice to ensure browser paint before transition
+6. **Cleanup after transition** - Content cleared only after 250ms animation completes
+
+### State Reset on Page Change
+
+When URL changes, `updateUIForNewPage()` resets:
+- `boardSections = []`
+- `currentSection = null`
+- `totalPins = 0`
+- `isPlaying = false`
+- `downloadedFiles = []`
+- `downloadedPinIds = new Set()`
+- `pinQueue = []`
+- Progress bars and status displays
+
 ## Key Variables
 
 - `boardSections[]`: Array of `{name, slug, url, pinCount}`
