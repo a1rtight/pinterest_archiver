@@ -319,10 +319,16 @@
           if (container) {
             // Check if container is visible and has pin count text
             var containerText = container.textContent || '';
-            var countMatch = containerText.match(/(\d+)\s*(?:pins?|Pins?)/i);
+            var name = decodeURIComponent(remainder).replace(/-/g, ' ');
+
+            // Remove section name from text before searching for pin count
+            // This prevents "IFA 2019" + "191 pins" = "IFA 2019191 pins" -> wrong count
+            var escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            var textWithoutName = containerText.replace(new RegExp(escapedName, 'gi'), ' ');
+
+            var countMatch = textWithoutName.match(/(\d+)\s*(?:pins?|Pins?)/i);
             if (countMatch) {
               var pinCount = parseInt(countMatch[1], 10);
-              var name = decodeURIComponent(remainder).replace(/-/g, ' ');
               if (!sectionMap.has(remainder)) {
                 sectionMap.set(remainder, { name: name, pinCount: pinCount });
                 console.log('[PA] Found section from DOM: "' + name + '" (' + pinCount + ' pins)');
@@ -378,6 +384,54 @@
     var systemRoutes = ['pins', 'more_ideas', 'followers', 'activity', 'settings', 'edit', 'invite', 'organize'];
     var isGoingToSection = pathParts.length >= 3 && systemRoutes.indexOf(pathParts[2]) === -1;
 
+    // Get expected title slug from URL for matching
+    var expectedSlug = isGoingToSection ? pathParts[2] : (pathParts[1] || '');
+    var expectedNorm = decodeURIComponent(expectedSlug).toLowerCase().replace(/[-\s]/g, '');
+
+    // Check if DOM h1 already has the correct title (matches URL)
+    var headingEl = document.querySelector('h1[title]') || document.querySelector('h1');
+    var domTitle = '';
+    var domReady = false;
+
+    if (headingEl) {
+      domTitle = headingEl.getAttribute('title') || headingEl.textContent.trim();
+      var domNorm = domTitle.toLowerCase().replace(/[-\s]/g, '');
+      // DOM is ready if it matches the URL we're navigating to
+      if (domNorm && expectedNorm && (domNorm === expectedNorm ||
+          domNorm.indexOf(expectedNorm) !== -1 || expectedNorm.indexOf(domNorm) !== -1)) {
+        domReady = true;
+      }
+    }
+
+    // Update info panel - only show title if DOM is ready, otherwise leave empty until poll finds it
+    var infoPanel = document.querySelector('#pa-overlay .pa-i');
+    if (infoPanel) {
+      var titleHtml = '<div class="pa-n" id="pa-title">' + (domReady ? esc(domTitle) : '') + '</div>';
+      titleHtml += '<div class="pa-p" id="pa-pincount">Loading...</div>';
+      infoPanel.innerHTML = titleHtml;
+    }
+
+    // Poll for DOM heading if not ready yet
+    if (!domReady) {
+      var pollCount = 0;
+      var pollForTitle = setInterval(function() {
+        var h1 = document.querySelector('h1[title]') || document.querySelector('h1');
+        if (h1) {
+          var title = h1.getAttribute('title') || h1.textContent.trim();
+          var titleNorm = title.toLowerCase().replace(/[-\s]/g, '');
+          // Check if h1 now matches the URL we navigated to
+          if (titleNorm && expectedNorm && (titleNorm === expectedNorm ||
+              titleNorm.indexOf(expectedNorm) !== -1 || expectedNorm.indexOf(titleNorm) !== -1)) {
+            var titleEl = document.getElementById('pa-title');
+            if (titleEl) titleEl.textContent = title;
+            clearInterval(pollForTitle);
+          }
+        }
+        pollCount++;
+        if (pollCount > 40) clearInterval(pollForTitle); // Stop after 2s
+      }, 50);
+    }
+
     // Lock current height and start animation IMMEDIATELY
     if (sectionsPanel) {
       var oldSectionHeight = sectionsPanel.offsetHeight;
@@ -425,15 +479,10 @@
     var info = await getBoardInfo();
     safeName = boardName.replace(/[^a-zA-Z0-9]/g, '_');
 
-    // Update the info panel
-    var infoPanel = document.querySelector('#pa-overlay .pa-i');
-    if (infoPanel) {
-      var html = '<div class="pa-n">' + esc(info.n) + '</div>';
-      if (info.section) {
-        html += '<div class="pa-p" style="color:#e60023">Section: ' + esc(info.section) + '</div>';
-      }
-      html += '<div class="pa-p">' + info.t.toLocaleString() + ' pins</div>';
-      infoPanel.innerHTML = html;
+    // Update ONLY the pin count (title is handled by the poll above)
+    var pinCountEl = document.getElementById('pa-pincount');
+    if (pinCountEl) {
+      pinCountEl.textContent = info.t.toLocaleString() + ' pins';
     }
 
     // For main board, detect and update sections (content swap only, no animation)
@@ -569,7 +618,7 @@
         currentUrl = location.href;
         updateUIForNewPage();
       }
-    }, 500);
+    }, 50); // Fast polling for instant response
   }
 
   // Stop watching for URL changes
@@ -586,10 +635,9 @@
     var overlay = document.createElement('div');
     overlay.id = 'pa-overlay';
     var html = '<div class="pa-h"><h2>Pinterest Archiver</h2><button class="pa-x" id="pa-x">×</button></div>';
-    html += '<div class="pa-c"><div class="pa-i"><div class="pa-n">' + esc(info.n) + '</div>';
-    if (info.section) {
-      html += '<div class="pa-p" style="color:#e60023">Section: ' + esc(info.section) + '</div>';
-    }
+    html += '<div class="pa-c"><div class="pa-i">';
+    // Use info.n (from DOM heading) - has proper case for both board and section
+    html += '<div class="pa-n">' + esc(info.n) + '</div>';
     html += '<div class="pa-p">' + info.t.toLocaleString() + ' pins</div></div>';
     html += '<div id="pa-sections-panel">';
     if (!info.section) {
@@ -1769,4 +1817,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v13.1 DYNAMIC UI (fixed 290px sections container)
+})(); // LATEST VERSION - v13.9 no flash on title - wait for DOM instead of showing URL slug

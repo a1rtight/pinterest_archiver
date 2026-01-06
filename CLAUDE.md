@@ -174,6 +174,31 @@ Three strategies are used to find board sections:
 - Only accepts links where parent container shows a pin count (e.g., "45 pins")
 - Extracts section name from nearby heading elements
 
+##### Section Name Number Merge Bug (Fixed v13.2)
+
+**Problem**: Section names containing numbers would merge with pin counts when extracted from DOM.
+
+Example:
+- Section name: "IFA 2019"
+- Pin count: "191 pins"
+- DOM `textContent`: "IFA 2019191 pins" (no space between name and count)
+- Regex `/(\d+)\s*(?:pins?|Pins?)/i` incorrectly captured "2019191"
+
+**Solution**: Remove the section name from container text before searching for pin count:
+
+```javascript
+var name = decodeURIComponent(remainder).replace(/-/g, ' ');
+
+// Remove section name from text before searching for pin count
+// This prevents "IFA 2019" + "191 pins" = "IFA 2019191 pins" -> wrong count
+var escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+var textWithoutName = containerText.replace(new RegExp(escapedName, 'gi'), ' ');
+
+var countMatch = textWithoutName.match(/(\d+)\s*(?:pins?|Pins?)/i);
+```
+
+This transforms "IFA 2019191 pins" → " 191 pins" before regex matching, correctly extracting 191.
+
 #### Strategy 3: Section Containers
 - Queries elements with `data-test-id` containing "section" or "board-section"
 - Extracts section info from contained links and text
@@ -438,6 +463,59 @@ if (isGoingToSection) {
 4. **Content after animation** - Sections load while/after animation plays
 5. **Double RAF** - Uses `requestAnimationFrame` twice to ensure browser paint before transition
 6. **Cleanup after transition** - Content cleared only after 250ms animation completes
+
+### Title Display (v13.9 - No Flash)
+
+**Problem**: When navigating between boards/sections via client-side routing, the title would flash incorrectly:
+1. URL changes immediately (e.g., `/user/board/cmf-ceramic-story`)
+2. Script detects URL change, extracts slug → "cmf ceramic story" (lowercase)
+3. DOM h1 still shows old page title (stale)
+4. Script shows URL-derived title → **flash of wrong case**
+5. DOM updates, script polls and corrects → "CMF - Ceramic Story"
+
+**Solution**: Never show URL-derived title. Wait for DOM or show nothing.
+
+```javascript
+// Get expected slug from URL for matching
+var expectedSlug = isGoingToSection ? pathParts[2] : pathParts[1];
+var expectedNorm = decodeURIComponent(expectedSlug).toLowerCase().replace(/[-\s]/g, '');
+
+// Check if DOM h1 already has correct title (matches URL)
+var headingEl = document.querySelector('h1[title]') || document.querySelector('h1');
+var domTitle = '';
+var domReady = false;
+
+if (headingEl) {
+  // Pinterest h1 has title attribute with proper case: <h1 title="CMF - Ceramic Story">
+  domTitle = headingEl.getAttribute('title') || headingEl.textContent.trim();
+  var domNorm = domTitle.toLowerCase().replace(/[-\s]/g, '');
+
+  // DOM ready if normalized title matches normalized URL slug
+  if (domNorm === expectedNorm || domNorm.indexOf(expectedNorm) !== -1) {
+    domReady = true;
+  }
+}
+
+// Only show title if DOM is ready, otherwise leave empty
+var titleHtml = '<div id="pa-title">' + (domReady ? domTitle : '') + '</div>';
+```
+
+#### Why This Works
+
+1. **No flash** - Never shows URL-derived lowercase title
+2. **Instant when ready** - If DOM already updated (rare), shows immediately
+3. **Brief empty** - If DOM stale, shows empty (less jarring than wrong text)
+4. **Polls for update** - Continues checking until h1 matches URL, then fills in
+
+#### Pinterest's h1 Structure
+
+```html
+<h1 class="..." title="CMF - Ceramic Story" style="-webkit-line-clamp: 1;">
+  CMF - Ceramic Story
+</h1>
+```
+
+The `title` attribute contains the properly-cased name, which we prefer over `textContent`.
 
 ### State Reset on Page Change
 
