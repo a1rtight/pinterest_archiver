@@ -1,0 +1,388 @@
+/* Pinterest Archiver Widget Styles - v14.0 */
+/* Matches Figma design */
+
+#pa-overlay {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  width: 320px;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.15);
+  z-index: 999999;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  color: #111;
+  max-height: 90vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+#pa-overlay * {
+  box-sizing: border-box;
+}
+
+/* Header */
+.pa-h {
+  padding: 16px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #efefef;
+}
+
+.pa-h h2 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.pa-x {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #111;
+  padding: 0;
+  line-height: 1;
+}
+
+.pa-x:hover {
+  opacity: 0.7;
+}
+
+/* Content */
+.pa-c {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* Board Name */
+.pa-n {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0 0 4px 0;
+  line-height: 1.2;
+}
+
+/* Pin count row */
+.pa-pin-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.pa-p {
+  font-size: 14px;
+  color: #767676;
+}
+
+.pa-scan {
+  background: none;
+  border: none;
+  font-size: 14px;
+  color: #767676;
+  cursor: pointer;
+  padding: 0;
+}
+
+.pa-scan:hover {
+  text-decoration: underline;
+}
+
+/* Sections Panel */
+#pa-sections-panel {
+  transition: height 0.25s ease;
+  overflow: hidden;
+}
+
+/* Sections Group */
+.pa-sec-group {
+  margin-bottom: 16px;
+}
+
+.pa-sec-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 12px;
+  cursor: pointer;
+}
+
+.pa-sec-header input {
+  width: 16px;
+  height: 16px;
+  margin: 0 10px 0 0;
+  cursor: pointer;
+  accent-color: #111;
+}
+
+.pa-sec-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* Section List */
+.pa-sec-list {
+  max-height: 160px;
+  overflow-y: auto;
+  margin-left: 26px;
+}
+
+.pa-sec-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 0;
+  cursor: pointer;
+}
+
+.pa-sec-item input {
+  width: 14px;
+  height: 14px;
+  margin: 0 10px 0 0;
+  cursor: pointer;
+  accent-color: #111;
+}
+
+.pa-sec-name {
+  flex: 1;
+  font-size: 14px;
+  color: #111;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pa-sec-pins {
+  font-size: 14px;
+  color: #767676;
+  margin-left: 12px;
+}
+
+/* Main Board Option */
+.pa-main {
+  display: flex;
+  align-items: center;
+  padding: 8px 0;
+  margin-bottom: 20px;
+  cursor: pointer;
+}
+
+.pa-main input {
+  width: 16px;
+  height: 16px;
+  margin: 0 10px 0 0;
+  cursor: pointer;
+  accent-color: #111;
+}
+
+.pa-main-label {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.pa-main-pins {
+  font-size: 15px;
+  color: #767676;
+  margin-left: 6px;
+}
+
+/* Buttons */
+.pa-btns {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 24px;
+}
+
+.pa-btn {
+  flex: 1;
+  padding: 14px 20px;
+  border-radius: 24px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: opacity 0.2s;
+}
+
+.pa-btn:hover {
+  opacity: 0.9;
+}
+
+.pa-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.pa-btn-start {
+  background: #e60023;
+  color: #fff;
+}
+
+.pa-btn-pause {
+  background: #111;
+  color: #fff;
+}
+
+/* Progress Section */
+.pa-progress {
+  margin-bottom: 20px;
+}
+
+.pa-progress-text {
+  font-size: 14px;
+  color: #111;
+  margin-bottom: 8px;
+}
+
+.pa-progress-bar {
+  height: 8px;
+  background: #efefef;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.pa-progress-fill {
+  height: 100%;
+  background: #111;
+  transition: width 0.3s ease;
+}
+
+/* Author */
+.pa-author {
+  display: flex;
+  align-items: center;
+  padding-top: 16px;
+  border-top: 1px solid #efefef;
+}
+
+.pa-author-label {
+  font-size: 14px;
+  color: #767676;
+  margin-right: 8px;
+}
+
+.pa-author-dot {
+  width: 12px;
+  height: 12px;
+  background: #f5a623;
+  border-radius: 50%;
+  margin-right: 6px;
+}
+
+.pa-author-name {
+  font-size: 14px;
+  color: #111;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+/* Status Area (hidden by default) */
+.pa-s {
+  display: none;
+  padding: 12px;
+  background: #f8f8f8;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 16px;
+}
+
+.pa-s.on {
+  display: block;
+}
+
+.pa-g {
+  height: 4px;
+  background: #eee;
+  border-radius: 2px;
+  margin-top: 8px;
+}
+
+.pa-gb {
+  height: 100%;
+  background: #111;
+  width: 0;
+  transition: width 0.3s;
+}
+
+/* Message Area (hidden by default) */
+.pa-m {
+  display: none;
+  padding: 12px;
+  background: #fff8e6;
+  border-radius: 8px;
+  font-size: 13px;
+  margin-bottom: 16px;
+}
+
+.pa-m.on {
+  display: block;
+}
+
+/* Loading Spinner */
+@keyframes pa-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.pa-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #efefef;
+  border-top-color: #e60023;
+  border-radius: 50%;
+  animation: pa-spin 1s linear infinite;
+}
+
+/* Loading State */
+.pa-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  color: #767676;
+  font-size: 13px;
+}
+
+.pa-loading .pa-spinner {
+  margin-bottom: 12px;
+}
+
+/* Live Status */
+#pa-live-status {
+  display: none;
+  margin-bottom: 16px;
+}
+
+#pa-live-status.on {
+  display: block;
+}
+
+.pa-live {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: #e60023;
+  border-radius: 50%;
+  margin-right: 8px;
+  animation: pa-pulse 1s infinite;
+}
+
+.pa-paused {
+  background: #767676;
+  animation: none;
+}
+
+@keyframes pa-pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
