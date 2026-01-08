@@ -374,8 +374,28 @@
 
   // Update the UI info panel when URL changes (dynamic navigation)
   async function updateUIForNewPage() {
-    // Always reset on page change - stop any in-progress download
+    // Always reset on page change - stop any in-progress download IMMEDIATELY
+    // This must happen before any await to prevent race conditions with running workers
     scrollAbort = true;
+    isPlaying = false;
+    isPaused = false;
+    downloadedFiles = [];
+    downloadedPinIds = new Set();
+    pinQueue = [];
+    fileCounter = 0;
+    activeDownloads = 0;
+
+    // Immediately update UI to show reset state (before any await)
+    var dlCount = document.getElementById('pa-dl-count');
+    if (dlCount) dlCount.textContent = '0';
+    var dlBar = document.getElementById('pa-dl-bar');
+    if (dlBar) dlBar.style.width = '0%';
+    var liveStatus = document.getElementById('pa-live-status');
+    if (liveStatus) liveStatus.classList.remove('on');
+    var playBtn = document.getElementById('pa-play');
+    if (playBtn) { playBtn.disabled = false; playBtn.textContent = 'Start'; }
+    var pauseBtn = document.getElementById('pa-pause');
+    if (pauseBtn) pauseBtn.disabled = true;
 
     var sectionsPanel = document.getElementById('pa-sections-panel');
 
@@ -491,43 +511,14 @@
       updateSectionsPanelContent(sections, info);
     }
 
-    // Reset download state for new page
-    isPlaying = false;
-    isPaused = false;
-    scrollAbort = false;
-    downloadedFiles = [];
-    downloadedPinIds = new Set();
-    pinQueue = [];
-    fileCounter = 0;
-    activeDownloads = 0;
+    // Reset remaining state (download state was reset at top of function)
+    scrollAbort = false; // Allow new scrolling
     boardGridContainer = null;
     reachedRecommendations = false;
 
-    // Update progress bar area
-    var dlCount = document.getElementById('pa-dl-count');
-    if (dlCount) dlCount.textContent = '0';
-
-    var dlBar = document.getElementById('pa-dl-bar');
-    if (dlBar) dlBar.style.width = '0%';
-
-    // Update total pins display
+    // Update total pins display with new board's count
     var dlTotal = document.getElementById('pa-dl-total');
     if (dlTotal) dlTotal.textContent = info.t;
-
-    // Reset play/pause buttons
-    var playBtn = document.getElementById('pa-play');
-    var pauseBtn = document.getElementById('pa-pause');
-    if (playBtn) {
-      playBtn.disabled = false;
-      playBtn.textContent = 'Start';
-    }
-    if (pauseBtn) {
-      pauseBtn.disabled = true;
-    }
-
-    // Hide live status
-    var liveStatus = document.getElementById('pa-live-status');
-    if (liveStatus) liveStatus.classList.remove('on');
 
     // Reset status area
     var statusArea = document.getElementById('pa-s');
