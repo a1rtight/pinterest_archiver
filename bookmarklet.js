@@ -319,16 +319,10 @@
           if (container) {
             // Check if container is visible and has pin count text
             var containerText = container.textContent || '';
-            var name = decodeURIComponent(remainder).replace(/-/g, ' ');
-
-            // Remove section name from text before searching for pin count
-            // This prevents "IFA 2019" + "191 pins" = "IFA 2019191 pins" -> wrong count
-            var escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-            var textWithoutName = containerText.replace(new RegExp(escapedName, 'gi'), ' ');
-
-            var countMatch = textWithoutName.match(/(\d+)\s*(?:pins?|Pins?)/i);
+            var countMatch = containerText.match(/(\d+)\s*(?:pins?|Pins?)/i);
             if (countMatch) {
               var pinCount = parseInt(countMatch[1], 10);
+              var name = decodeURIComponent(remainder).replace(/-/g, ' ');
               if (!sectionMap.has(remainder)) {
                 sectionMap.set(remainder, { name: name, pinCount: pinCount });
                 console.log('[PA] Found section from DOM: "' + name + '" (' + pinCount + ' pins)');
@@ -374,28 +368,8 @@
 
   // Update the UI info panel when URL changes (dynamic navigation)
   async function updateUIForNewPage() {
-    // Always reset on page change - stop any in-progress download IMMEDIATELY
-    // This must happen before any await to prevent race conditions with running workers
+    // Always reset on page change - stop any in-progress download
     scrollAbort = true;
-    isPlaying = false;
-    isPaused = false;
-    downloadedFiles = [];
-    downloadedPinIds = new Set();
-    pinQueue = [];
-    fileCounter = 0;
-    activeDownloads = 0;
-
-    // Immediately update UI to show reset state (before any await)
-    var dlCount = document.getElementById('pa-dl-count');
-    if (dlCount) dlCount.textContent = '0';
-    var dlBar = document.getElementById('pa-dl-bar');
-    if (dlBar) dlBar.style.width = '0%';
-    var liveStatus = document.getElementById('pa-live-status');
-    if (liveStatus) liveStatus.classList.remove('on');
-    var playBtn = document.getElementById('pa-play');
-    if (playBtn) { playBtn.disabled = false; playBtn.textContent = 'Start'; }
-    var pauseBtn = document.getElementById('pa-pause');
-    if (pauseBtn) pauseBtn.disabled = true;
 
     var sectionsPanel = document.getElementById('pa-sections-panel');
 
@@ -429,7 +403,7 @@
       titleEl.textContent = domReady ? domTitle : '';
     }
 
-    // Update pin count
+    // Update pin count to loading state
     var pinCountEl = document.getElementById('pa-pincount');
     if (pinCountEl) {
       pinCountEl.textContent = 'Loading...';
@@ -473,7 +447,7 @@
           });
         });
       } else {
-        // EXPANDING: Show fixed-height container with loading spinner
+        // EXPANDING: Show loading spinner with new CSS classes
         sectionsPanel.innerHTML = '<div class="pa-loading"><div class="pa-spinner"></div><div>Loading sections...</div></div>';
 
         sectionsPanel.style.height = oldSectionHeight + 'px';
@@ -511,14 +485,43 @@
       updateSectionsPanelContent(sections, info);
     }
 
-    // Reset remaining state (download state was reset at top of function)
-    scrollAbort = false; // Allow new scrolling
+    // Reset download state for new page
+    isPlaying = false;
+    isPaused = false;
+    scrollAbort = false;
+    downloadedFiles = [];
+    downloadedPinIds = new Set();
+    pinQueue = [];
+    fileCounter = 0;
+    activeDownloads = 0;
     boardGridContainer = null;
     reachedRecommendations = false;
 
-    // Update total pins display with new board's count
+    // Update progress bar area
+    var dlCount = document.getElementById('pa-dl-count');
+    if (dlCount) dlCount.textContent = '0';
+
+    var dlBar = document.getElementById('pa-dl-bar');
+    if (dlBar) dlBar.style.width = '0%';
+
+    // Update total pins display
     var dlTotal = document.getElementById('pa-dl-total');
     if (dlTotal) dlTotal.textContent = info.t;
+
+    // Reset play/pause buttons
+    var playBtn = document.getElementById('pa-play');
+    var pauseBtn = document.getElementById('pa-pause');
+    if (playBtn) {
+      playBtn.disabled = false;
+      playBtn.textContent = 'Start';
+    }
+    if (pauseBtn) {
+      pauseBtn.disabled = true;
+    }
+
+    // Hide live status
+    var liveStatus = document.getElementById('pa-live-status');
+    if (liveStatus) liveStatus.classList.remove('on');
 
     // Hide message area
     var msgArea = document.getElementById('pa-m');
@@ -585,7 +588,7 @@
         currentUrl = location.href;
         updateUIForNewPage();
       }
-    }, 50); // Fast polling for instant response
+    }, 500);
   }
 
   // Stop watching for URL changes
@@ -611,12 +614,9 @@
     // Board name
     html += '<div class="pa-n" id="pa-title">' + esc(info.n) + '</div>';
 
-    // Pin count row with scan button
+    // Pin count row
     html += '<div class="pa-pin-row">';
     html += '<span class="pa-p" id="pa-pincount">~' + info.t.toLocaleString() + ' pins' + (info.section ? ' (section)' : '') + '</span>';
-    // if (!info.section) {
-    //   html += '<button class="pa-scan" id="pa-scan-btn">scan again</button>';
-    // }
     html += '</div>';
 
     // Sections panel
@@ -723,25 +723,12 @@
       updateSectionsPanel(sections);
     }
 
-    // Scan button handler (commented out)
-    // var scanBtn = document.getElementById('pa-scan-btn');
-    // if (scanBtn) {
-    //   scanBtn.onclick = async function() {
-    //     scanBtn.textContent = 'scanning...';
-    //     scanBtn.disabled = true;
-    //     await detectSectionsAsync();
-    //     updateSectionsPanel(boardSections);
-    //     scanBtn.textContent = 'scan again';
-    //     scanBtn.disabled = false;
-    //   };
-    // }
-
     // Start watching for URL changes (client-side navigation)
     startUrlWatcher();
   }
 
   function stat(text, progress) {
-    // Show status next to the red dot in live status area
+    // Show status in the live status area
     var liveText = document.getElementById('pa-live-text');
     if (liveText) liveText.textContent = text;
   }
@@ -1795,4 +1782,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v14.0 new Figma-based UI styling
+})(); // LATEST VERSION - v14.1 (working pin detection from a805fa0 + new Figma-based styling + title polling)
