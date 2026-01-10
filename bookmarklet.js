@@ -785,59 +785,6 @@
   // Cache for section divider heading position (per document)
   var recHeadingCache = new WeakMap();
 
-  // INVENTORY: Extract ALL pin IDs and URLs from Pinterest's JSON data in <script> tags
-  // This is the authoritative source - Pinterest embeds complete board data here
-  function extractPinInventoryFromJSON(doc) {
-    var inventory = new Map(); // pinId -> {url}
-    var scripts = doc.querySelectorAll('script:not([src])');
-
-    scripts.forEach(function(script) {
-      var text = script.textContent;
-      if (!text || text.length < 100) return;
-
-      // Find all pin IDs in the JSON
-      // Pinterest uses multiple formats:
-      // - Quoted string: "id":"474777985739200659" or "id":"AXhq..."
-      // - Unquoted number: "id":474777985739200659
-
-      // Pattern 1: Quoted IDs (alphanumeric, 10+ chars)
-      var quotedPattern = /"id"\s*:\s*"([A-Za-z0-9_-]{10,})"/g;
-      var match;
-      while ((match = quotedPattern.exec(text)) !== null) {
-        var pinId = match[1];
-        if (inventory.has(pinId)) continue;
-
-        var contextEnd = Math.min(text.length, match.index + 2000);
-        var context = text.substring(match.index, contextEnd);
-
-        var urlMatch = context.match(/"orig"\s*:\s*\{[^}]*"url"\s*:\s*"([^"]+pinimg\.com[^"]+)"/);
-        if (urlMatch) {
-          var url = urlMatch[1].replace(/\\u002F/g, '/');
-          inventory.set(pinId, { url: url });
-        }
-      }
-
-      // Pattern 2: Unquoted numeric IDs (15+ digits to avoid other numeric IDs)
-      var unquotedPattern = /"id"\s*:\s*(\d{15,})/g;
-      while ((match = unquotedPattern.exec(text)) !== null) {
-        var pinId = match[1];
-        if (inventory.has(pinId)) continue;
-
-        var contextEnd = Math.min(text.length, match.index + 2000);
-        var context = text.substring(match.index, contextEnd);
-
-        var urlMatch = context.match(/"orig"\s*:\s*\{[^}]*"url"\s*:\s*"([^"]+pinimg\.com[^"]+)"/);
-        if (urlMatch) {
-          var url = urlMatch[1].replace(/\\u002F/g, '/');
-          inventory.set(pinId, { url: url });
-        }
-      }
-    });
-
-    console.log('[PA] Inventory: Found ' + inventory.size + ' pins in JSON data');
-    return inventory;
-  }
-
   function findSectionDividerInDoc(doc) {
     // Check cache first
     if (recHeadingCache.has(doc)) return recHeadingCache.get(doc);
@@ -1382,7 +1329,6 @@
       // CRITICAL: Track how many pins were downloaded BEFORE main board
       // So we only count MAIN BOARD pins against the cap, not section pins
       pinsBeforeMainBoard = downloadedPinIds.size;
-      var filesBeforeMainBoard = downloadedFiles.length;
 
       console.warn('[PA] Main board: expecting ~' + expectedPinCount + ' pins (total: ' + totalPins + ' - sections: ' + sectionPinTotal + ')');
       console.warn('[PA] Pins already downloaded (sections): ' + pinsBeforeMainBoard);
@@ -1405,75 +1351,7 @@
 
       // Wait for remaining downloads to finish
       await waitForWorkers();
-
-      // FINAL SWEEP: Multiple passes to catch ALL lazy-loaded board pins
-      // Skip if we already have all expected pins
-      var mainBoardDownloaded = downloadedFiles.length - filesBeforeMainBoard;
-      if (mainBoardDownloaded >= expectedPinCount && expectedPinCount > 0) {
-        console.log('[PA] Already have all ' + expectedPinCount + ' pins - skipping final sweep');
-        stat('All ' + expectedPinCount + ' pins collected', 1);
-      } else {
-      // Pinterest lazy-loads images - need to scroll multiple times to trigger all loading
-      // Grid container filtering is primary, recommendation detection is backup
-      stat('Final sweep for missed pins...', 0.95);
-
-      for (var pass = 0; pass < 3 && !isPaused; pass++) {
-        // Stop if we've reached recommendations (grid filtering is primary)
-        if (reachedRecommendations) {
-          console.log('[PA] Final sweep: reached recommendations, skipping pass ' + (pass + 1));
-          break;
-        }
-
-        // Scroll to very bottom first to trigger all lazy loading
-        window.scrollTo(0, document.body.scrollHeight);
-        await sleep(800);
-
-        // Now scroll back to top
-        window.scrollTo(0, 0);
-        await sleep(800);
-
-        var foundInPass = 0;
-        var pageHeight = document.body.scrollHeight;
-        var scrollStep = window.innerHeight * 0.8;
-        var scrollPos = 0;
-
-        // Start workers for final sweep
-        isScrolling = true;
-        startWorkers();
-
-        // Scroll through entire page slowly to catch everything
-        while (scrollPos < pageHeight && !isPaused && !reachedRecommendations) {
-          window.scrollTo(0, scrollPos);
-          await sleep(300);
-
-          var found = scanForNewPins();
-          foundInPass += found;
-          updateLiveStats();
-
-          scrollPos += scrollStep;
-        }
-
-        isScrolling = false;
-        await waitForWorkers();
-
-        stat('Pass ' + (pass + 1) + '/3: found ' + foundInPass + ' more board pins (skipped ' + skippedRecs + ' recs)', 0.95 + (pass * 0.015));
-
-        // If we didn't find any new board pins in this pass, we're done
-        if (foundInPass === 0) break;
-      }
-
-      stat('Finishing downloads...', 0.99);
-      } // end else (final sweep)
-    }
-
-    // VERIFICATION: Check for any pins missed by DOM scanning
-    // Skip if we already have all expected pins
-    if (!isPaused && totalPins > 0 && downloadedFiles.length < totalPins) {
-      // First try JSON inventory
-      await verifyAndDownloadMissing(totalPins);
-
-      // Then do a final DOM sweep for any unprocessed pins
-      await finalDOMVerification();
+      stat('Download complete: ' + downloadedFiles.length + ' pins', 1);
     }
 
     // Auto-save if not paused manually
@@ -1511,135 +1389,6 @@
     document.getElementById('pa-pause').disabled = true;
 
     if (liveIndicator) liveIndicator.classList.remove('pa-paused');
-  }
-
-  // VERIFICATION: Check JSON inventory for any pins missed by DOM scanning
-  async function verifyAndDownloadMissing(expectedCount) {
-    var currentCount = downloadedPinIds.size;
-    console.log('[PA] Verification: Have ' + currentCount + '/' + expectedCount + ' pins');
-
-    // Extract complete inventory from JSON
-    var inventory = extractPinInventoryFromJSON(document);
-
-    // Check inventory count vs expected
-    if (inventory.size < expectedCount) {
-      console.log('[PA] Warning: JSON inventory (' + inventory.size + ') < expected (' + expectedCount + ')');
-    }
-
-    // Find pins we don't have
-    var missingPins = [];
-    inventory.forEach(function(data, pinId) {
-      if (!downloadedPinIds.has(pinId)) {
-        missingPins.push({ pinId: pinId, url: data.url });
-      }
-    });
-
-    if (missingPins.length === 0) {
-      console.log('[PA] Verification: All pins accounted for');
-      return;
-    }
-
-    console.log('[PA] Found ' + missingPins.length + ' missing pins to download');
-    stat('Downloading ' + missingPins.length + ' missing pins...', 0.95);
-
-    // Queue missing pins for download (uses existing parallel workers)
-    missingPins.forEach(function(pin) {
-      if (!downloadedPinIds.has(pin.pinId) && pin.url) {
-        downloadedPinIds.add(pin.pinId);
-        fileCounter++;
-        pinQueue.push({
-          pinId: pin.pinId,
-          url: getOriginalUrl(pin.url),
-          element: null, // No DOM element for inventory pins
-          fileNum: fileCounter
-        });
-      }
-    });
-
-    // Start workers if not running, wait for queue to drain
-    isScrolling = true;
-    startWorkers();
-
-    while (pinQueue.length > 0 || activeDownloads > 0) {
-      await sleep(100);
-      updateLiveStats();
-    }
-
-    isScrolling = false;
-    console.log('[PA] Verification complete: ' + downloadedFiles.length + ' total pins');
-  }
-
-  // FINAL DOM VERIFICATION: Catch any pins in the DOM that weren't processed
-  // This is a last-resort scan that ignores grid filtering
-  async function finalDOMVerification() {
-    console.log('[PA] Final DOM verification - scanning all pins in page...');
-
-    var allPinContainers = document.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
-    var foundMissing = 0;
-
-    allPinContainers.forEach(function(container) {
-      // Skip if already processed
-      if (container.dataset.paQueued || container.dataset.paDownloaded || container.dataset.paSkipped) {
-        return;
-      }
-
-      // Find pin link
-      var link = container.querySelector('a[href*="/pin/"]');
-      if (!link) return;
-
-      var match = link.href.match(/\/pin\/([^\/]+)/);
-      if (!match) return;
-
-      var pinId = match[1];
-
-      // Skip if already downloaded
-      if (downloadedPinIds.has(pinId)) return;
-
-      // Find image
-      var img = container.querySelector('img[src*="pinimg.com"]');
-      if (!img) img = container.querySelector('img[srcset*="pinimg.com"]');
-      if (!img) return;
-
-      var imgUrl = img.src || (img.srcset ? img.srcset.split(' ')[0] : null);
-      if (!imgUrl || !isValidPinImage(imgUrl)) return;
-
-      var origUrl = getOriginalUrl(imgUrl);
-      if (!origUrl) return;
-
-      // This pin was missed! Queue it for download
-      console.log('[PA] Final verification: found missed pin ' + pinId);
-      foundMissing++;
-
-      downloadedPinIds.add(pinId);
-      fileCounter++;
-      pinQueue.push({
-        pinId: pinId,
-        url: origUrl,
-        element: container,
-        fileNum: fileCounter
-      });
-      container.dataset.paQueued = 'true';
-    });
-
-    if (foundMissing === 0) {
-      console.log('[PA] Final DOM verification: no missed pins found');
-      return;
-    }
-
-    console.log('[PA] Final verification: queued ' + foundMissing + ' missed pins');
-    stat('Downloading ' + foundMissing + ' missed pins...', 0.98);
-
-    // Download the missed pins
-    isScrolling = true;
-    startWorkers();
-
-    while (pinQueue.length > 0 || activeDownloads > 0) {
-      await sleep(100);
-      updateLiveStats();
-    }
-
-    isScrolling = false;
-    console.log('[PA] Final verification complete: ' + downloadedFiles.length + ' total pins');
   }
 
   // Save collected files to zip
@@ -1752,23 +1501,6 @@
       var stopReason = sectionReachedRecs ? 'recommendations detected' : (pinData.size >= target ? 'target reached' : 'no more pins');
       console.log('[PA] Section "' + sectionName + '" complete: ' + pinData.size + '/' + target + ' pins (' + stopReason + ')' + (skippedRecs > 0 ? ', skipped ' + skippedRecs + ' recs' : ''));
 
-      // VERIFICATION: Check JSON inventory for any pins missed by DOM scanning
-      var sectionInventory = extractPinInventoryFromJSON(iframeDoc);
-      console.log('[PA] Section "' + sectionName + '": Inventory has ' + sectionInventory.size + ' pins');
-
-      // Find and recover any pins we missed
-      var recovered = 0;
-      sectionInventory.forEach(function(data, pinId) {
-        if (!pinData.has(pinId) && data.url) {
-          pinData.set(pinId, getOriginalUrl(data.url));
-          recovered++;
-        }
-      });
-      if (recovered > 0) {
-        console.log('[PA] Section "' + sectionName + '" verification: recovered ' + recovered + ' missed pins');
-      }
-      console.log('[PA] Section "' + sectionName + '" after verification: ' + pinData.size + ' pins');
-
       var urls = [], pinIds = new Set();
       pinData.forEach(function(url, id) {
         if (url) {
@@ -1782,4 +1514,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v14.1 (working pin detection from a805fa0 + new Figma-based styling + title polling)
+})(); // LATEST VERSION - v14.3 (no final sweep - scroll once, download immediately)
