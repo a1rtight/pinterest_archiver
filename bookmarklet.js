@@ -1133,6 +1133,12 @@
   async function downloadWorker() {
     workersRunning++;
     while (isPlaying && !isPaused) {
+      // Stop immediately if we've downloaded enough pins
+      if (expectedPinCount > 0 && pinsBeforeMainBoard >= 0) {
+        var mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
+        if (mainBoardDownloaded >= expectedPinCount) break;
+      }
+
       if (pinQueue.length === 0) {
         if (!isScrolling) break;
         await sleep(10); // Fast polling when queue empty
@@ -1172,10 +1178,17 @@
   }
 
   async function waitForWorkers() {
-    while (workersRunning > 0 || pinQueue.length > 0) {
+    while (workersRunning > 0) {
+      // Also break if we've hit the target (workers may have stopped early)
+      if (expectedPinCount > 0 && pinsBeforeMainBoard >= 0) {
+        var mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
+        if (mainBoardDownloaded >= expectedPinCount) break;
+      }
       await sleep(50);
       updateLiveStats();
     }
+    // Clear any remaining queue items (workers stopped at target)
+    pinQueue.length = 0;
   }
 
   // Scroll loop - continuously scrolls to load more pins
@@ -1187,14 +1200,12 @@
     // CRITICAL: Scan pins at current position FIRST before any scrolling
     scanForNewPins();
     updateLiveStats();
-    await sleep(150);
 
     while (isPlaying && !isPaused && !scrollAbort) {
-      // Stop immediately if we hit the target pin count
-      var mainBoardPinsClaimed = downloadedPinIds.size - pinsBeforeMainBoard;
-      if (expectedPinCount > 0 && mainBoardPinsClaimed >= expectedPinCount) {
-        stat('Target reached: ' + expectedPinCount + ' pins', 1);
-        console.log('[PA] Target reached: ' + mainBoardPinsClaimed + '/' + expectedPinCount + ' - stopping immediately');
+      // Stop immediately if we've DOWNLOADED enough pins (not just queued)
+      var mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
+      if (expectedPinCount > 0 && mainBoardDownloaded >= expectedPinCount) {
+        console.log('[PA] Target downloaded: ' + mainBoardDownloaded + '/' + expectedPinCount + ' - stopping immediately');
         break;
       }
 
@@ -1206,7 +1217,7 @@
       }
 
       window.scrollBy(0, window.innerHeight * 1.5);
-      await sleep(150);
+      await sleep(50);
 
       var found = scanForNewPins();
       updateLiveStats();
@@ -1216,11 +1227,13 @@
         noNewPinsCount++;
         if (noNewPinsCount > 20) {
           window.scrollTo(0, document.body.scrollHeight);
-          await sleep(500);
+          await sleep(200);
+          // Check target during stuck detection
+          mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
+          if (expectedPinCount > 0 && mainBoardDownloaded >= expectedPinCount) break;
           scanForNewPins();
           var afterAggressiveTotal = pinQueue.length + downloadedFiles.length;
           if (afterAggressiveTotal === lastTotalPins) {
-            stat('All board pins found: ' + downloadedFiles.length, 1);
             console.log('[PA] Scroll complete: ' + downloadedFiles.length + ' board pins');
             break;
           }
@@ -1232,12 +1245,13 @@
         lastTotalPins = currentTotal;
       }
 
+      // Update UI and check target one more time
       var liveText = document.getElementById('pa-live-text');
+      mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
       if (liveText) {
-        // Show main board progress only (subtract section pins)
-        var mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
         liveText.textContent = 'Downloading... ' + mainBoardDownloaded + '/' + expectedPinCount;
       }
+      if (expectedPinCount > 0 && mainBoardDownloaded >= expectedPinCount) break;
     }
   }
 
@@ -1341,7 +1355,7 @@
 
       // Start from top of page
       window.scrollTo(0, 0);
-      await sleep(500);
+      await sleep(100);
 
       // Start workers IMMEDIATELY - they'll grab pins as soon as they're queued
       isScrolling = true;
@@ -1350,10 +1364,11 @@
       // Run scroll loop (workers download in parallel)
       await scrollLoop();
       isScrolling = false;
+      pinQueue.length = 0; // Clear queue - stop workers from grabbing more
 
-      // Wait for remaining downloads to finish
-      await waitForWorkers();
-      stat('Download complete: ' + downloadedFiles.length + ' pins', 1);
+      // Save immediately with what we have
+      var mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
+      stat('Complete: ' + mainBoardDownloaded + ' pins', 1);
     }
 
     // Auto-save if not paused manually
@@ -1401,8 +1416,7 @@
       return;
     }
 
-    stat('Creating zip with ' + downloadedFiles.length + ' images...', 1);
-    await sleep(100);
+    stat('Creating zip...', 1);
 
     // Sort files by name to ensure correct order in ZIP
     downloadedFiles.sort(function(a, b) { return a.name.localeCompare(b.name); });
