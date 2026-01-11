@@ -685,6 +685,218 @@ Updates in real-time via `updateLiveStats()`.
 Increase MAX_PARALLEL for faster downloads (may hit rate limits).
 Decrease scroll delay for faster scanning (may miss pins).
 
+## Chunked Download / Pause & Resume (v14.4-v14.8)
+
+### The Problem
+
+When pausing a download and resuming, pins were being lost between chunks. Example: Chunk 1 ends at pin 43, Chunk 2 starts at pin 96 (missing pins 44-95).
+
+### Root Cause
+
+With 10 parallel workers, when `isPaused = true` is set:
+1. Workers exit immediately without processing remaining queue
+2. Pins that were claimed in `downloadedPinIds` but not yet downloaded are "orphaned"
+3. On resume, those pin IDs are already marked as claimed, so they're skipped
+4. DOM elements still have `paQueued` flags, so they're never re-scanned
+
+### The Solution: Rebuild State from Actual Downloads
+
+On pause, rebuild `downloadedPinIds` from ONLY successfully downloaded files:
+
+```javascript
+async function pauseAndSave() {
+  isPaused = true;
+
+  // Wait for in-flight downloads to complete
+  while (activeDownloads > 0) await sleep(100);
+
+  // REBUILD downloadedPinIds from ONLY successfully downloaded files
+  var actuallyDownloaded = new Set();
+  downloadedFiles.forEach(function(file) {
+    if (file.pinId) actuallyDownloaded.add(file.pinId);
+  });
+
+  // Find orphaned pins (claimed but never downloaded)
+  var orphanedPins = [];
+  downloadedPinIds.forEach(function(id) {
+    if (!actuallyDownloaded.has(id)) orphanedPins.push(id);
+  });
+
+  // Replace downloadedPinIds with only actually-downloaded pins
+  downloadedPinIds = actuallyDownloaded;
+
+  // Clear DOM flags for elements that weren't downloaded
+  document.querySelectorAll('[data-pa-queued="true"]').forEach(function(el) {
+    if (!el.dataset.paDownloaded) delete el.dataset.paQueued;
+  });
+
+  // Reset fileCounter to highest actually downloaded
+  var maxFileNum = 0;
+  downloadedFiles.forEach(function(file) {
+    if (file.fileNum > maxFileNum) maxFileNum = file.fileNum;
+  });
+  fileCounter = maxFileNum;
+}
+```
+
+### Pin Ordering Fix (v14.8-v14.9)
+
+**Problem**: Rogue pins from further down the board appeared at the start of chunk 2.
+
+**Root Cause**: DOM order ≠ visual order. Pinterest inserts elements anywhere in the DOM, not in scroll order.
+
+**Solution**: Sort pins by visual Y position before queuing:
+
+```javascript
+function scanForNewPins() {
+  var pinElements = document.querySelectorAll('[data-test-id="pin"]');
+
+  // CRITICAL: Sort by visual position (top to bottom)
+  var sortedPins = Array.from(pinElements).sort(function(a, b) {
+    return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+  });
+
+  // Also skip elements far below viewport (stale from previous scroll)
+  sortedPins.forEach(function(container) {
+    var rect = container.getBoundingClientRect();
+    if (rect.top > viewportHeight * 3) return; // Skip - will be scanned when we scroll there
+    // ... rest of scan logic
+  });
+}
+```
+
+## Large Board Download Limits (v15.1-v15.4)
+
+### The Problem
+
+Pinterest imposes implicit limits on continuous downloads:
+- ~400 pins: First cap observed
+- ~1000 pins: Second cap observed
+- ~2000 pins: Third cap observed
+
+### Root Causes
+
+1. **Grid Container Detachment**: Pinterest's aggressive DOM virtualization removes our cached grid container from the document. All subsequent pins fail the `isInBoardGrid()` check.
+
+2. **Element Recycling**: Pinterest recycles DOM elements - the same element that showed pin 1 now shows pin 1001, but our `paQueued` flag persists.
+
+3. **Stuck Detection Too Aggressive**: Standard stuck detection (20 iterations) triggers too early on large boards.
+
+### Solution 1: Validate Grid Container (v15.1)
+
+Before using cached grid container, verify it's still in the document:
+
+```javascript
+function getGridContainer(doc) {
+  if (isMainDoc && boardGridContainer) {
+    // CRITICAL: Check if cached container is still in document
+    if (!document.contains(boardGridContainer)) {
+      console.log('[PA] Grid container detached from DOM - re-detecting');
+      boardGridContainer = null;
+
+      // Clear 'outside-grid' skip markers - they were based on old grid
+      document.querySelectorAll('[data-pa-skipped="outside-grid"]').forEach(function(el) {
+        delete el.dataset.paSkipped;
+      });
+    } else {
+      return boardGridContainer;
+    }
+  }
+  // ... re-detect grid
+}
+```
+
+### Solution 2: Handle Element Recycling (v15.3)
+
+Detect when Pinterest recycles an element for a different pin:
+
+```javascript
+function scanForNewPins() {
+  sortedPins.forEach(function(container) {
+    // Handle stale flags from RECYCLED elements
+    if (container.dataset.paQueued || container.dataset.paDownloaded) {
+      var link = container.querySelector('a[href*="/pin/"]');
+      if (link) {
+        var match = link.href.match(/\/pin\/([^\/]+)/);
+        if (match && !downloadedPinIds.has(match[1])) {
+          // Element was recycled - pin ID doesn't match what we processed
+          delete container.dataset.paQueued;
+          delete container.dataset.paDownloaded;
+          container.style.opacity = '';
+        }
+      }
+    }
+    // ... rest of scan
+  });
+}
+```
+
+### Solution 3: Multi-Strategy Stuck Recovery (v15.4)
+
+Extended stuck detection with multiple recovery strategies:
+
+```javascript
+if (noNewPinsCount > 30) {
+  // Strategy 1: Scroll to absolute bottom
+  window.scrollTo(0, document.body.scrollHeight);
+  await sleep(800);
+  scanForNewPins();
+
+  if (stillStuck) {
+    // Strategy 2: Scroll up then back down (triggers Pinterest reload)
+    window.scrollTo(0, document.body.scrollHeight - window.innerHeight * 10);
+    await sleep(500);
+    window.scrollTo(0, document.body.scrollHeight);
+    await sleep(800);
+    scanForNewPins();
+  }
+
+  if (stillStuck) {
+    // Strategy 3: Scroll WAY past bottom (Pinterest might extend scrollHeight)
+    window.scrollBy(0, window.innerHeight * 20);
+    await sleep(1000);
+    scanForNewPins();
+  }
+}
+```
+
+### Solution 4: Staged Downloads (v15.5)
+
+For very large boards (6000+ pins), memory becomes an issue. Auto-save every 2000 pins:
+
+```javascript
+// In downloadWorker, after adding file:
+if (stagedDownloadEnabled && downloadedFiles.length >= 2000 && !isAutoSaving) {
+  await autoSaveAndContinue();
+}
+
+async function autoSaveAndContinue() {
+  isAutoSaving = true;
+
+  // Wait for in-flight downloads
+  while (activeDownloads > 0) await sleep(50);
+
+  // Save ZIP
+  chunkNumber++;
+  var zipData = createZip(downloadedFiles);
+  // ... trigger download
+
+  // Track total and free memory
+  totalDownloadedAllChunks += downloadedFiles.length;
+  downloadedFiles = [];  // Free memory
+
+  isAutoSaving = false;
+}
+```
+
+### Key Insights
+
+1. **Pinterest virtualizes aggressively** - Don't trust cached DOM references
+2. **Pinterest recycles elements** - Check pin ID matches before trusting flags
+3. **DOM order ≠ visual order** - Always sort by `getBoundingClientRect().top`
+4. **Memory matters** - Auto-save chunks to prevent browser crashes on 5000+ pin boards
+5. **Multiple recovery strategies** - One scroll technique isn't enough for all boards
+
 ## Limitations
 
 - Popup blocker may block section tab opening
