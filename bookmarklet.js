@@ -21,6 +21,9 @@
   var scrollAbort = false;
   var fileCounter = 0;
   var safeName = '';
+  var chunkNumber = 0; // For chunked downloads on large boards
+  var totalDownloadedAllChunks = 0; // Track total pins across all chunks for progress bar
+  var lastDownloadedPinId = null; // Track the last pin that was ACTUALLY downloaded (not just queued)
 
   // URL watching for dynamic UI updates
   var currentUrl = location.href;
@@ -496,6 +499,8 @@
     activeDownloads = 0;
     boardGridContainer = null;
     reachedRecommendations = false;
+    chunkNumber = 0;
+    totalDownloadedAllChunks = 0;
 
     // Update progress bar area
     var dlCount = document.getElementById('pa-dl-count');
@@ -752,12 +757,15 @@
     var countEl = document.getElementById('pa-dl-count');
     var barEl = document.getElementById('pa-dl-bar');
 
-    if (dlEl) dlEl.textContent = downloadedFiles.length;
+    // Use cumulative total for progress (supports chunked downloads)
+    var cumulativeDownloaded = totalDownloadedAllChunks + downloadedFiles.length;
+
+    if (dlEl) dlEl.textContent = cumulativeDownloaded;
     if (qEl) qEl.textContent = pinQueue.length;
     if (aEl) aEl.textContent = activeDownloads;
-    if (countEl) countEl.textContent = downloadedFiles.length;
+    if (countEl) countEl.textContent = cumulativeDownloaded;
     if (barEl && totalPins > 0) {
-      barEl.style.width = Math.min(100, (downloadedFiles.length / totalPins) * 100) + '%';
+      barEl.style.width = Math.min(100, (cumulativeDownloaded / totalPins) * 100) + '%';
     }
   }
 
@@ -1059,24 +1067,43 @@
   var skippedRecs = 0;
   function scanForNewPins() {
     var found = 0;
-
-    // CAP CHECK DISABLED - relying on grid container filtering instead
-    // var maxPins = Math.ceil(expectedPinCount * pinCountBuffer);
-    // var mainBoardPinCount = downloadedPinIds.size - pinsBeforeMainBoard;
-    // if (expectedPinCount > 0 && mainBoardPinCount >= maxPins) {
-    //   console.log('[PA] Reached pin cap: ' + mainBoardPinCount + '/' + maxPins + ' main board pins');
-    //   return 0;
-    // }
+    var viewportHeight = window.innerHeight;
 
     var pinElements = document.querySelectorAll('[data-test-id="pin"], [data-grid-item="true"]');
 
-    pinElements.forEach(function(container) {
+    // CRITICAL: Sort by visual position (top to bottom)
+    // DOM order does NOT match visual order - Pinterest inserts elements anywhere
+    // This ensures fileCounter increments in visual scroll order
+    var sortedPins = Array.from(pinElements).sort(function(a, b) {
+      return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+    });
+
+    sortedPins.forEach(function(container) {
+      // Handle stale paQueued flags from elements virtualized during pause
+      // These elements weren't in DOM when we cleared flags, but Pinterest recreated them with old state
+      if (container.dataset.paQueued && !container.dataset.paDownloaded) {
+        var link = container.querySelector('a[href*="/pin/"]');
+        if (link) {
+          var match = link.href.match(/\/pin\/([^\/]+)/);
+          if (match && !downloadedPinIds.has(match[1])) {
+            // Pin was queued but not downloaded - stale flag, clear it
+            delete container.dataset.paQueued;
+          }
+        }
+      }
+
       if (container.dataset.paQueued || container.dataset.paDownloaded || container.dataset.paSkipped) return;
       if (container.closest('header, nav')) return;
 
-      // CAP CHECK DISABLED - relying on grid container filtering instead
-      // var mbCount = downloadedPinIds.size - pinsBeforeMainBoard;
-      // if (expectedPinCount > 0 && mbCount >= maxPins) return;
+      // POSITION CHECK: Only queue pins near current scroll position
+      // This prevents queuing stale elements from a previous scroll position
+      // that Pinterest hasn't virtualized yet (causes rogue pins at chunk boundaries)
+      var rect = container.getBoundingClientRect();
+      if (rect.top > viewportHeight * 3) {
+        // Element is more than 3 viewports below - likely stale from previous scroll
+        // It will be properly scanned when we scroll there
+        return;
+      }
 
       // PRIMARY CHECK: Is this pin within the board's grid container?
       // This ensures we only collect pins from the same grid as board pins
@@ -1163,8 +1190,11 @@
         downloadedFiles.push({
           name: item.filePath || (safeName + '/' + String(item.fileNum).padStart(5, '0') + '.jpg'),
           data: data,
-          crc: crc32(new Uint8Array(data))
+          crc: crc32(new Uint8Array(data)),
+          pinId: item.pinId,
+          fileNum: item.fileNum
         });
+        lastDownloadedPinId = item.pinId; // Track last ACTUALLY downloaded pin
       }
 
       if (item.element) {
@@ -1256,7 +1286,9 @@
       var liveText = document.getElementById('pa-live-text');
       mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
       if (liveText) {
-        liveText.textContent = 'Downloading... ' + mainBoardDownloaded + '/' + expectedPinCount;
+        // Show cumulative progress for chunked downloads
+        var cumulativeTotal = totalDownloadedAllChunks + downloadedFiles.length;
+        liveText.textContent = 'Downloading... ' + cumulativeTotal + '/' + totalPins;
       }
       if (expectedPinCount > 0 && mainBoardDownloaded >= expectedPinCount) break;
     }
@@ -1395,41 +1427,122 @@
     }
   }
 
-  // Pause and save current progress
+  // Pause and save current progress (chunked download for large boards)
+  // KEY: Rebuild downloadedPinIds from ACTUALLY downloaded files, not queue state
   async function pauseAndSave() {
+    // 1. Stop everything immediately
     isPaused = true;
     scrollAbort = true;
+    isScrolling = false;
 
+    // 2. Log state at pause click
+    console.log('[PA] === PAUSE CLICKED ===');
+    console.log('[PA] downloadedPinIds size: ' + downloadedPinIds.size);
+    console.log('[PA] Downloaded files: ' + downloadedFiles.length);
+    console.log('[PA] Queue length: ' + pinQueue.length);
+    console.log('[PA] Active downloads: ' + activeDownloads);
+
+    // 3. Show status
     var liveStatus = document.getElementById('pa-live-status');
     var liveIndicator = liveStatus?.querySelector('.pa-live');
     if (liveIndicator) liveIndicator.classList.add('pa-paused');
-
     var liveText = document.getElementById('pa-live-text');
-    if (liveText) liveText.textContent = 'Pausing...';
+    if (liveText) liveText.textContent = 'Finishing ' + activeDownloads + ' in-flight...';
+    stat('Finishing in-flight downloads...', 0.9);
 
-    stat('Finishing current downloads...', 0.9);
-
-    // Wait for active downloads to complete
+    // 4. Wait for IN-FLIGHT downloads to complete
     while (activeDownloads > 0) {
       await sleep(100);
       updateLiveStats();
+      if (liveText) liveText.textContent = 'Finishing ' + activeDownloads + ' in-flight...';
     }
 
-    await saveZip();
+    // 5. REBUILD downloadedPinIds from ONLY successfully downloaded files
+    // This is the authoritative source - not queue state, not DOM flags
+    var actuallyDownloaded = new Set();
+    downloadedFiles.forEach(function(file) {
+      if (file.pinId) {
+        actuallyDownloaded.add(file.pinId);
+      }
+    });
 
-    // Reset state for potential resume
+    // 6. Find pins that were claimed but never downloaded
+    var orphanedPins = [];
+    downloadedPinIds.forEach(function(id) {
+      if (!actuallyDownloaded.has(id)) {
+        orphanedPins.push(id);
+      }
+    });
+
+    console.log('[PA] Orphaned pins (claimed but not downloaded): ' + orphanedPins.length);
+
+    // 7. Replace downloadedPinIds with only actually-downloaded pins
+    downloadedPinIds = actuallyDownloaded;
+
+    // 8. Clear DOM flags for ALL elements that weren't successfully downloaded
+    // Query DOM directly - don't rely on stale element references
+    var clearedElements = 0;
+    document.querySelectorAll('[data-pa-queued="true"]').forEach(function(el) {
+      if (!el.dataset.paDownloaded) {
+        delete el.dataset.paQueued;
+        clearedElements++;
+      }
+    });
+    console.log('[PA] Cleared paQueued from ' + clearedElements + ' DOM elements');
+
+    // 9. Find highest fileNum actually downloaded
+    var maxFileNum = 0;
+    downloadedFiles.forEach(function(file) {
+      if (file.fileNum && file.fileNum > maxFileNum) {
+        maxFileNum = file.fileNum;
+      }
+    });
+    fileCounter = maxFileNum;
+
+    console.log('[PA] === PAUSE COMPLETE ===');
+    console.log('[PA] downloadedPinIds rebuilt: ' + downloadedPinIds.size + ' pins');
+    console.log('[PA] Highest fileNum: ' + maxFileNum);
+    console.log('[PA] fileCounter set to: ' + fileCounter);
+
+    // 10. Save current chunk
+    chunkNumber++;
+    await saveZip(true);
+
+    // 11. Track total for progress bar continuity
+    totalDownloadedAllChunks += downloadedFiles.length;
+    console.log('[PA] Chunk ' + chunkNumber + ' saved: ' + downloadedFiles.length + ' pins, cumulative: ' + totalDownloadedAllChunks);
+
+    // 12. Clear for next chunk
+    downloadedFiles = [];
+    pinQueue = [];
+
+    // 13. Reset state for continuation
     isPlaying = false;
+    isPaused = false;
+    scrollAbort = false;
+
     var playBtn = document.getElementById('pa-play');
     var pauseBtn = document.getElementById('pa-pause');
-    playBtn.disabled = false;
-    playBtn.textContent = 'Resume';
+
+    // Reset button to Start state
+    playBtn.textContent = 'Start';
+    playBtn.classList.remove('pa-btn-downloading');
+    playBtn.classList.add('pa-btn-start');
     if (pauseBtn) pauseBtn.disabled = true;
 
+    // Hide live status
+    if (liveStatus) liveStatus.classList.remove('on');
     if (liveIndicator) liveIndicator.classList.remove('pa-paused');
+
+    // Update progress bar to show cumulative progress
+    updateLiveStats();
+
+    stat('Part ' + chunkNumber + ' saved (' + totalDownloadedAllChunks + '/' + totalPins + '). Click Start to continue.', 1);
   }
 
   // Save collected files to zip
-  async function saveZip() {
+  // isChunk = true for chunked saves (pause & download on large boards)
+  async function saveZip(isChunk) {
     if (downloadedFiles.length === 0) {
       stat('No pins to save', 0);
       msg('<b>No pins collected.</b> Try scrolling the page first.');
@@ -1445,7 +1558,14 @@
     var blob = new Blob([zipData], { type: 'application/zip' });
     var a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = safeName + '_pins_' + downloadedFiles.length + '.zip';
+
+    // Filename includes chunk number for chunked downloads
+    if (isChunk) {
+      a.download = safeName + '_part' + chunkNumber + '_' + downloadedFiles.length + 'pins.zip';
+    } else {
+      a.download = safeName + '_pins_' + downloadedFiles.length + '.zip';
+    }
+
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1454,7 +1574,7 @@
     msg('<b>Saved!</b> ' + downloadedFiles.length + ' images downloaded.');
 
     var liveStatus = document.getElementById('pa-live-status');
-    if (liveStatus) liveStatus.classList.remove('on');
+    if (liveStatus && !isChunk) liveStatus.classList.remove('on');
   }
 
   // Section download via iframe (kept for sections support)
@@ -1550,4 +1670,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v14.3 (no final sweep - scroll once, download immediately)
+})(); // LATEST VERSION - v15.0 (clear stale paQueued flags at scan time for virtualized elements)
