@@ -897,6 +897,185 @@ async function autoSaveAndContinue() {
 4. **Memory matters** - Auto-save chunks to prevent browser crashes on 5000+ pin boards
 5. **Multiple recovery strategies** - One scroll technique isn't enough for all boards
 
+## Pause/Resume Race Conditions (v17.0-v17.2)
+
+### The Problem
+
+When clicking pause and then resume, multiple issues caused broken downloads:
+1. **Two ZIP files on single pause click** - Instead of one chunk, two downloads triggered
+2. **State completely reset on resume** - `chunkNumber`, `downloadedPinIds`, `lastChunkBoundaryY` all reset to 0
+3. **Orphaned pins** - Pins claimed in queue but never downloaded, lost between chunks
+
+### What Didn't Work
+
+#### Attempt 1: Stop URL Watcher Alone
+```javascript
+function pauseAndSave() {
+  stopUrlWatcher();  // Prevent updateUIForNewPage() from running
+  // ...
+}
+```
+**Result**: Still downloaded two folders of the same pins. The URL watcher wasn't the only issue.
+
+#### Attempt 2: Add window.paResumeState Persistence
+```javascript
+window.paResumeState = {
+  chunkNumber: chunkNumber,
+  lastChunkBoundaryY: lastChunkBoundaryY,
+  downloadedPinIds: Array.from(downloadedPinIds)
+};
+```
+**Result**: State was saved but still reset to 0 on resume. The IIFE-scoped variables were being wiped by something else.
+
+#### Attempt 3: Move isPaused = true to Top of pauseAndSave
+```javascript
+async function pauseAndSave() {
+  isPaused = true;  // Set immediately to prevent Done branch
+  scrollAbort = true;
+  // ... rest of pause logic
+}
+```
+**Result**: Better - only one ZIP file. But 9 "orphaned" pins were lost between chunks. Workers exited before processing remaining queue.
+
+### Root Causes Discovered
+
+#### Bug 1: Race Condition Between Done Branch and pauseAndSave
+
+When pause is clicked:
+1. `pauseAndSave()` starts, sets `scrollAbort = true`
+2. `scrollLoop` sees `scrollAbort` and exits
+3. `startStreamingDownload` continues past scrollLoop, checks `if (!isPaused)` → TRUE (isPaused not set yet)
+4. Calls `saveZip()` → **First ZIP (chunk 0)**
+5. `pauseAndSave` continues, sets `isPaused = true`, saves → **Second ZIP (chunk 1)**
+
+**Result**: Two ZIP files on single pause click!
+
+#### Bug 2: URL Watcher Wiping State
+
+The URL watcher runs every 500ms checking for navigation. During pause:
+1. Pinterest updates URL (history state change during scrolling)
+2. URL watcher detects change, calls `updateUIForNewPage()`
+3. `updateUIForNewPage()` resets ALL state: `downloadedPinIds = new Set()`, `chunkNumber = 0`, etc.
+4. On resume, state is zeroed out
+
+#### Bug 3: Premature Worker Exit
+
+Workers run with this condition:
+```javascript
+while (isPlaying && !isPaused) {
+  if (pinQueue.length === 0) {
+    if (!isScrolling) break;  // Exit if scroll stopped and queue empty
+    await sleep(50);
+    continue;
+  }
+  // ... process item
+}
+```
+
+Setting `isPaused = true` immediately causes workers to exit via `!isPaused` check.
+Setting `isScrolling = false` causes workers to exit when queue is momentarily empty between items.
+
+Pins in queue when workers exit = **orphaned** (claimed but never downloaded).
+
+### The Working Solution (v17.2)
+
+#### Fix 1: pauseRequested Flag
+
+Add a new flag that blocks the Done branch without affecting workers:
+
+```javascript
+var pauseRequested = false;
+
+async function pauseAndSave() {
+  pauseRequested = true;  // Block Done branch immediately
+  scrollAbort = true;
+  // DON'T set isPaused or isScrolling yet - workers still need to run
+
+  // ... wait for queue to drain
+
+  // NOW set flags (after workers done)
+  isScrolling = false;
+  isPaused = true;
+}
+
+// In startStreamingDownload, Done branch:
+if (!isPaused && !pauseRequested) {  // Check BOTH flags
+  await saveZip();
+  // ...
+}
+```
+
+#### Fix 2: Session Flag to Block URL Watcher
+
+```javascript
+// When download starts:
+window.paSessionActive = true;
+
+// In URL watcher:
+if (window.paSessionActive) {
+  return;  // Skip updateUIForNewPage() during active session
+}
+
+// When download completes (Done state):
+window.paSessionActive = false;
+```
+
+#### Fix 3: Drain Queue Before Stopping Workers
+
+```javascript
+async function pauseAndSave() {
+  pauseRequested = true;
+  scrollAbort = true;
+  // Keep isScrolling = true so workers don't exit on empty queue
+
+  // Wait for queue to FULLY drain
+  var drainTimeout = 0;
+  var maxDrainWait = 150;  // 15 seconds max
+  while ((activeDownloads > 0 || pinQueue.length > 0) && drainTimeout < maxDrainWait) {
+    await sleep(100);
+    drainTimeout++;
+  }
+
+  // NOW stop workers (queue is empty)
+  isScrolling = false;
+  isPaused = true;
+
+  // ... calculate boundary, save ZIP
+}
+```
+
+### Key Insight: Order of Flag Setting Matters
+
+The fix depends on the precise order of operations:
+
+| Step | pauseRequested | isPaused | isScrolling | Workers | Done Branch |
+|------|----------------|----------|-------------|---------|-------------|
+| 1. Pause clicked | ✓ set | false | true | Running | Blocked |
+| 2. Queue draining | ✓ | false | true | Running | Blocked |
+| 3. Queue empty | ✓ | false | true | Waiting | Blocked |
+| 4. Set flags | ✓ | ✓ set | ✗ cleared | Exit | Blocked |
+| 5. Save ZIP | ✓ | ✓ | ✗ | Stopped | Still blocked |
+
+Workers continue until queue is empty, THEN exit. One download = one folder.
+
+### Console Logging
+
+```
+[PA][PAUSE] pauseRequested=true, waiting for queue to drain...
+[PA][PAUSE] Queue drained: 0 queued, 0 active
+[PA][PAUSE] Setting isPaused=true, isScrolling=false
+[PA][PAUSE] lastChunkBoundaryY: 4521, downloadedPinIds: 234
+[PA] Saving chunk 0 with 234 files
+```
+
+On resume:
+```
+[PA][RESUME] Restoring state: chunkNumber=1, lastChunkBoundaryY=4521
+[PA][RESUME] downloadedPinIds restored: 234 pins
+[PA] Scrolling to Y=3821 (boundary - 2 viewports)
+[PA] Skipping pin above boundary Y=4521
+```
+
 ## Limitations
 
 - Popup blocker may block section tab opening
