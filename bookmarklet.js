@@ -1269,19 +1269,30 @@
           queuedAtY: item.queuedAtY || 0 // Preserve Y position for boundary tracking
         });
         lastDownloadedPinId = item.pinId; // Track last ACTUALLY downloaded pin
-      }
 
-      if (item.element) {
-        item.element.dataset.paDownloaded = 'true';
-        item.element.style.opacity = '0.3';
+        // Only mark element as downloaded if fetch SUCCEEDED
+        if (item.element) {
+          item.element.dataset.paDownloaded = 'true';
+          item.element.style.opacity = '0.3';
 
-        // DOM CLEANUP: Remove elements far above viewport to reduce browser bloat
-        // Pinterest's lazy loader only loads content BELOW, so removing above is safe
-        var rect = item.element.getBoundingClientRect();
-        if (rect.bottom < -window.innerHeight * 2) {
-          // Element is 2+ viewports above - safe to remove
-          item.element.remove();
+          // DOM CLEANUP: Remove elements far above viewport to reduce browser bloat
+          // Pinterest's lazy loader only loads content BELOW, so removing above is safe
+          var rect = item.element.getBoundingClientRect();
+          if (rect.bottom < -window.innerHeight * 2) {
+            // Element is 2+ viewports above - safe to remove
+            item.element.remove();
+          }
         }
+      } else {
+        // Fetch FAILED - unclaim the pin so it can be re-scanned and re-queued
+        if (item.pinId) {
+          downloadedPinIds.delete(item.pinId);
+        }
+        if (item.element) {
+          delete item.element.dataset.paQueued;
+          item.element.style.opacity = '';
+        }
+        console.log('[PA] Fetch failed for pin ' + item.pinId + ', unclaimed for retry');
       }
 
       activeDownloads--;

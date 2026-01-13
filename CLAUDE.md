@@ -1076,6 +1076,78 @@ On resume:
 [PA] Skipping pin above boundary Y=4521
 ```
 
+## Fetch Failure Recovery (v17.3)
+
+### The Problem
+
+Orphaned pins still occurred intermittently even after v17.2 fixes. Example: 3 successful pause/resumes, then 6 orphaned pins on the 4th.
+
+### Root Cause
+
+When `fetchMedia()` fails (network error, rate limiting, timeout), the worker still marked the element as downloaded:
+
+```javascript
+var data = await fetchMedia(item.url);
+if (data) {
+  downloadedFiles.push({ ... });  // Only happens on success
+}
+
+// BUG: This ALWAYS ran, even when fetch failed
+if (item.element) {
+  item.element.dataset.paDownloaded = 'true';  // Marked as done!
+  item.element.style.opacity = '0.3';
+}
+```
+
+Result:
+1. Pin claimed in `downloadedPinIds` during scan
+2. Pin removed from queue (shifted)
+3. Fetch fails, NOT added to `downloadedFiles`
+4. Element marked `paDownloaded = true` anyway
+5. Pin never re-scanned (appears already done)
+6. **Pin orphaned** - claimed but never downloaded
+
+### The Solution (v17.3)
+
+Move element marking inside the success block, and unclaim failed pins:
+
+```javascript
+var data = await fetchMedia(item.url);
+if (data) {
+  downloadedFiles.push({ ... });
+
+  // Only mark as downloaded on SUCCESS
+  if (item.element) {
+    item.element.dataset.paDownloaded = 'true';
+    item.element.style.opacity = '0.3';
+  }
+} else {
+  // Fetch FAILED - unclaim for retry
+  if (item.pinId) {
+    downloadedPinIds.delete(item.pinId);
+  }
+  if (item.element) {
+    delete item.element.dataset.paQueued;
+    item.element.style.opacity = '';
+  }
+  console.log('[PA] Fetch failed for pin ' + item.pinId + ', unclaimed for retry');
+}
+```
+
+### Why This Works
+
+1. **Failed pins get second chance** - Removed from `downloadedPinIds`, cleared from DOM flags
+2. **Next scroll re-scans** - Element no longer marked, gets re-queued
+3. **Intermittent failures recovered** - Network glitches don't cause permanent loss
+4. **Console visibility** - Log message shows which pins failed for debugging
+
+### Note on File Numbering
+
+When a pin fails and is later re-queued, it gets a NEW `fileNum` based on its position at re-queue time, not its original position. This means:
+- Files still download in scroll order
+- A failed-then-retried pin appears later in numbering
+- No gaps in file sequence (but pin may be "out of order" visually)
+
 ## Limitations
 
 - Popup blocker may block section tab opening
