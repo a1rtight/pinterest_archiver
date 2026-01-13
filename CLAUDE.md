@@ -1141,12 +1141,9 @@ if (data) {
 3. **Intermittent failures recovered** - Network glitches don't cause permanent loss
 4. **Console visibility** - Log message shows which pins failed for debugging
 
-### Note on File Numbering
+### Known Limitation
 
-When a pin fails and is later re-queued, it gets a NEW `fileNum` based on its position at re-queue time, not its original position. This means:
-- Files still download in scroll order
-- A failed-then-retried pin appears later in numbering
-- No gaps in file sequence (but pin may be "out of order" visually)
+Since we scroll DOWN continuously, failed pins in the middle of a chunk may not be re-scanned (we've already scrolled past). These pins are unclaimed but won't be retried unless scroll passes them again.
 
 ## Limitations
 

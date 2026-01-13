@@ -30,6 +30,43 @@
   var permanentlyDownloadedIds = new Set(); // Pin IDs from ALL chunks - never cleared during session
   var lastChunkBoundaryY = 0; // Y position boundary - only download pins BELOW this on resume
 
+  // Diagnostic logging for large downloads (30k+ pins)
+  function logStopDiagnostics(reason) {
+    var totalDownloaded = totalDownloadedAllChunks + downloadedFiles.length;
+    console.log('\n========== [PA] DOWNLOAD STOPPED ==========');
+    console.log('[PA] REASON: ' + reason);
+    console.log('[PA] --- Download Stats ---');
+    console.log('[PA] Total downloaded (all chunks): ' + totalDownloaded);
+    console.log('[PA] Current chunk files: ' + downloadedFiles.length);
+    console.log('[PA] Chunk number: ' + chunkNumber);
+    console.log('[PA] Target pin count: ' + totalPins);
+    console.log('[PA] Expected main board pins: ' + (typeof expectedPinCount !== 'undefined' ? expectedPinCount : 'N/A'));
+    console.log('[PA] --- Queue State ---');
+    console.log('[PA] Queue length: ' + pinQueue.length);
+    console.log('[PA] Active downloads: ' + activeDownloads);
+    console.log('[PA] Workers running: ' + (typeof workersRunning !== 'undefined' ? workersRunning : 'N/A'));
+    console.log('[PA] --- Flags ---');
+    console.log('[PA] isPlaying: ' + isPlaying);
+    console.log('[PA] isPaused: ' + isPaused);
+    console.log('[PA] pauseRequested: ' + pauseRequested);
+    console.log('[PA] scrollAbort: ' + scrollAbort);
+    console.log('[PA] isScrolling: ' + (typeof isScrolling !== 'undefined' ? isScrolling : 'N/A'));
+    console.log('[PA] reachedRecommendations: ' + (typeof reachedRecommendations !== 'undefined' ? reachedRecommendations : 'N/A'));
+    console.log('[PA] --- Scroll Position ---');
+    console.log('[PA] Current scroll Y: ' + window.scrollY);
+    console.log('[PA] Document height: ' + document.body.scrollHeight);
+    console.log('[PA] Viewport height: ' + window.innerHeight);
+    console.log('[PA] Last chunk boundary Y: ' + lastChunkBoundaryY);
+    console.log('[PA] --- DOM State ---');
+    console.log('[PA] Pins in DOM: ' + document.querySelectorAll('[data-test-id="pin"]').length);
+    console.log('[PA] Queued elements: ' + document.querySelectorAll('[data-pa-queued]').length);
+    console.log('[PA] Downloaded elements: ' + document.querySelectorAll('[data-pa-downloaded]').length);
+    console.log('[PA] Skipped elements: ' + document.querySelectorAll('[data-pa-skipped]').length);
+    console.log('[PA] downloadedPinIds size: ' + downloadedPinIds.size);
+    console.log('[PA] permanentlyDownloadedIds size: ' + permanentlyDownloadedIds.size);
+    console.log('============================================\n');
+  }
+
   // CRITICAL: Restore resume state from window if it exists (survives IIFE resets)
   // This is the fix for state being wiped between pause and resume
   if (window.paResumeState) {
@@ -1243,11 +1280,17 @@
       // Stop immediately if we've downloaded enough pins
       if (expectedPinCount > 0 && pinsBeforeMainBoard >= 0) {
         var mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
-        if (mainBoardDownloaded >= expectedPinCount) break;
+        if (mainBoardDownloaded >= expectedPinCount) {
+          console.log('[PA][WORKER] Exiting: target reached (' + mainBoardDownloaded + '/' + expectedPinCount + ')');
+          break;
+        }
       }
 
       if (pinQueue.length === 0) {
-        if (!isScrolling) break;
+        if (!isScrolling) {
+          console.log('[PA][WORKER] Exiting: queue empty and scrolling stopped');
+          break;
+        }
         await sleep(10); // Fast polling when queue empty
         continue;
       }
@@ -1302,6 +1345,12 @@
       if (stagedDownloadEnabled && downloadedFiles.length >= 2000 && !isAutoSaving) {
         await autoSaveAndContinue();
       }
+    }
+    // Log why worker exited (if not already logged by break statements above)
+    if (!isPlaying) {
+      console.log('[PA][WORKER] Exiting: isPlaying=false');
+    } else if (isPaused) {
+      console.log('[PA][WORKER] Exiting: isPaused=true');
     }
     workersRunning--;
   }
@@ -1363,14 +1412,14 @@
       // Stop immediately if we've DOWNLOADED enough pins (not just queued)
       var mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
       if (expectedPinCount > 0 && mainBoardDownloaded >= expectedPinCount) {
-        console.log('[PA] Target downloaded: ' + mainBoardDownloaded + '/' + expectedPinCount + ' - stopping immediately');
+        logStopDiagnostics('TARGET_REACHED: Downloaded ' + mainBoardDownloaded + '/' + expectedPinCount + ' pins');
         break;
       }
 
       // Stop if we reached recommendations (grid container filtering is primary)
       if (reachedRecommendations) {
         stat('Reached recommendations section', 1);
-        console.log('[PA] Stopping: reached recommendations section');
+        logStopDiagnostics('RECOMMENDATIONS_SECTION: Grid container filtering detected end of board pins');
         break;
       }
 
@@ -1417,10 +1466,10 @@
             // Check target during stuck detection
             mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
             if (expectedPinCount > 0 && mainBoardDownloaded >= expectedPinCount) {
-              console.log('[PA] Target reached: ' + mainBoardDownloaded + '/' + expectedPinCount);
+              logStopDiagnostics('STUCK_BUT_TARGET_REACHED: ' + mainBoardDownloaded + '/' + expectedPinCount + ' after recovery attempts');
               break;
             }
-            console.log('[PA] Scroll complete: ' + downloadedFiles.length + ' board pins (target was ' + expectedPinCount + ')');
+            logStopDiagnostics('STUCK_ALL_STRATEGIES_FAILED: No new pins after 30 iterations + 3 recovery strategies. Board pins: ' + downloadedFiles.length + ', target: ' + expectedPinCount);
             break;
           }
 
@@ -1441,7 +1490,19 @@
         var cumulativeTotal = totalDownloadedAllChunks + downloadedFiles.length;
         liveText.textContent = 'Downloading... ' + cumulativeTotal + '/' + totalPins;
       }
-      if (expectedPinCount > 0 && mainBoardDownloaded >= expectedPinCount) break;
+      if (expectedPinCount > 0 && mainBoardDownloaded >= expectedPinCount) {
+        logStopDiagnostics('TARGET_REACHED_END_OF_LOOP: ' + mainBoardDownloaded + '/' + expectedPinCount);
+        break;
+      }
+    }
+
+    // Log if we exited due to while condition (not a break)
+    if (!isPlaying) {
+      logStopDiagnostics('LOOP_EXIT_NOT_PLAYING: isPlaying became false');
+    } else if (isPaused) {
+      logStopDiagnostics('LOOP_EXIT_PAUSED: isPaused became true');
+    } else if (scrollAbort) {
+      logStopDiagnostics('LOOP_EXIT_SCROLL_ABORT: scrollAbort was set (likely pause button)');
     }
   }
 
@@ -1602,8 +1663,14 @@
 
       // Run scroll loop (workers download in parallel)
       await scrollLoop();
+      console.log('[PA] scrollLoop exited, stopping workers...');
       isScrolling = false;
       pinQueue.length = 0; // Clear queue - stop workers from grabbing more
+
+      // Wait for workers to finish
+      console.log('[PA] Waiting for ' + workersRunning + ' workers to finish...');
+      await waitForWorkers();
+      console.log('[PA] All workers finished');
 
       // Save immediately with what we have
       var mainBoardDownloaded = downloadedFiles.length - pinsBeforeMainBoard;
@@ -1612,6 +1679,7 @@
 
     // Auto-save if not paused manually (check both flags)
     if (!isPaused && !pauseRequested) {
+      logStopDiagnostics('DOWNLOAD_COMPLETE: Saving final ZIP');
       await saveZip();
       // Update buttons to Done state
       var playBtn = document.getElementById('pa-play');
