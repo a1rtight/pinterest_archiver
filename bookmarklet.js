@@ -1376,24 +1376,38 @@
   }
 
   // Periodic DOM cleanup to reduce browser bloat on large boards
-  // Removes downloaded elements that are far above the viewport
+  // BALANCED: Runs every 1000px, but keeps 3 viewports of buffer to maintain scroll height
+  // (1 viewport was too aggressive - Pinterest stopped loading when page height collapsed)
   var lastCleanupScroll = 0;
   function cleanupOldElements() {
     var currentScroll = window.scrollY;
-    // Only cleanup every 3000px of scrolling to avoid excessive DOM queries
-    if (currentScroll - lastCleanupScroll < 3000) return;
+    // Cleanup every 1000px of scrolling (more frequent than before)
+    if (currentScroll - lastCleanupScroll < 1000) return;
     lastCleanupScroll = currentScroll;
 
     var removed = 0;
+    var threshold = -window.innerHeight * 3; // Keep 3 viewports of buffer (was 2, then 1 which was too aggressive)
+
+    // Clean downloaded elements
     document.querySelectorAll('[data-pa-downloaded="true"]').forEach(function(el) {
       var rect = el.getBoundingClientRect();
-      if (rect.bottom < -window.innerHeight * 2) {
+      if (rect.bottom < threshold) {
         el.remove();
         removed++;
       }
     });
+
+    // Also clean skipped elements - they'll never be downloaded
+    document.querySelectorAll('[data-pa-skipped]').forEach(function(el) {
+      var rect = el.getBoundingClientRect();
+      if (rect.bottom < threshold) {
+        el.remove();
+        removed++;
+      }
+    });
+
     if (removed > 0) {
-      console.log('[PA] Cleaned up ' + removed + ' old elements to reduce bloat');
+      console.log('[PA] Cleaned up ' + removed + ' old elements (keeping 3vh buffer)');
     }
   }
 
