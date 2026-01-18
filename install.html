@@ -20,9 +20,9 @@
       display: grid;
       grid-template-columns: .7fr 3.4fr 3.4fr .7fr;
       gap: 0 .4rem;
-      height: calc(100dvh - 4rem);
+      min-height: calc(100dvh - 4rem);
       margin: 2rem 0;
-      overflow-y: auto;
+      padding-bottom: 3rem;
     }
     .content {
       grid-column: 3;
@@ -108,11 +108,12 @@
     .author {
       display: flex;
       align-items: center;
-      position: sticky;
-      bottom: 0;
       background: #fff;
-      margin-top: 1.6rem;
-      padding-top: 1rem;
+      padding: 1rem 0 1.8rem 0;
+      position: fixed;
+      bottom: 0;
+      left: 50%;
+      width: 36rem;
     }
     .author-label {
       font-size: 14px;
@@ -145,7 +146,6 @@
     @media (max-width: 1200px) {
       body {
         grid-template-columns: .3fr 3.4fr 3.4fr .3fr;
-        margin-bottom: 2rem;
       }
     }
     @media (max-width: 950px) {
