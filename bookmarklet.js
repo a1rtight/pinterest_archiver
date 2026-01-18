@@ -697,10 +697,10 @@
 
     // Staged download option - only for large boards (>500 pins)
     if (info.t > 500) {
-      html += '<label class="pa-main" style="margin-bottom:16px">';
+      html += '<label class="pa-main">';
       html += '<input type="checkbox" id="pa-staged" checked>';
-      html += '<span class="pa-main-label">Staged download</span>';
-      html += '<span class="pa-main-pins">(2k pins each | recommended)</span>';
+      html += '<span class="pa-main-label">Staged downloads</span>';
+      html += '<span class="pa-main-pins">(2k pins each)</span>';
       html += '</label>';
     }
 

@@ -8,104 +8,152 @@
     * { box-sizing: border-box; }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      max-width: 650px;
-      margin: 50px auto;
-      padding: 20px;
-      line-height: 1.6;
-      color: #333;
+      margin: 0;
+      padding: 0;
+      line-height: 1.3rem;
+      color: #000;
+      font-size: 1rem;
+      display: grid;
+      grid-template-columns: 1fr 3fr 3fr 1fr;
+      gap: 0 .4rem;
+      height: calc(100dvh - 4rem);
+      margin: 2rem 0;
     }
-    h1 { color: #e60023; }
-    .bookmarklet-btn { display: inline-block; background: #e60023; color: white; padding: 15px 30px; border-radius: 30px; text-decoration: none; font-size: 18px; font-weight: 600; margin: 20px 0; cursor: grab; }
-    .bookmarklet-btn:hover { background: #ad081b; }
-    .steps {
-      background: #f8f8f8;
-      padding: 20px;
-      border-radius: 10px;
-      margin: 20px 0;
+    .content {
+      grid-column: 3;
+      display: flex;
+      flex-direction: column;
+      max-width: 36rem;
     }
-    .steps ol { padding-left: 20px; }
-    .steps li { margin-bottom: 12px; }
+    p {
+      margin: 0;
+    }
+    h1, h3 {
+      font-size: 1rem;
+      line-height: 1.3rem;
+      border-top: 1px solid #E4E4E4;
+      padding-top: .4rem;
+      margin: 1rem 0 .5rem 0;
+    }
+    h1 {
+      margin-top: 0;
+    }
+    .subtitle {
+      margin-bottom: 2rem;
+    }
+    .bookmarklet-link {
+      display: inline-flex;
+      align-items: baseline;
+      cursor: grab;
+      color: #e60023;
+      text-decoration: none;
+    }
+    .bookmarklet-dot {
+      width: 14px;
+      height: 14px;
+      background: #e60023;
+      border-radius: 50%;
+      margin-right: 6px;
+      position: relative;
+      top: 2px;
+    }
+    ol {
+      padding-left: 20px;
+      margin: 0;
+    }
+    ol li {
+      margin-bottom: 12px;
+    }
     code {
       background: #eee;
       padding: 2px 6px;
       border-radius: 4px;
-      font-size: 13px;
+      font-size: 1rem;
+    }
+    figure {
+      margin: 0;
+      font-size: 14px;
+      color: #000;
     }
     .note {
-      background: #fff3cd;
-      padding: 15px;
-      border-radius: 8px;
-      border-left: 4px solid #ffc107;
-      margin: 20px 0;
-    }
-    .copy-section {
-      margin: 30px 0;
+      margin-top: auto;
+      margin-bottom: 1.4rem;
+      background: #FFF8E6;
       padding: 20px;
-      background: #f0f0f0;
-      border-radius: 10px;
+      border-radius: 8px;
     }
-    .copy-btn {
-      background: #333;
-      color: white;
-      border: none;
-      padding: 10px 20px;
-      border-radius: 6px;
-      cursor: pointer;
+    .install-list {
+      list-style: none;
+      padding-left: 0;
+    }
+    .install-list + figure {
+      margin-bottom: 2rem;
+    }
+    ol:not(.install-list) {
+      margin-bottom: 2rem;
+      margin-left: 1rem;
+    }
+    .author {
+      display: flex;
+      align-items: center;
+      padding-top: 17px;
+      border-top: 1px solid #efefef;
+    }
+    .author-label {
       font-size: 14px;
+      color: #111;
+      margin-right: 8px;
     }
-    .copy-btn:hover { background: #555; }
-    .success { color: #28a745; font-weight: 600; }
-    #code-area {
-      width: 100%;
-      height: 100px;
-      font-family: monospace;
-      font-size: 11px;
-      margin-top: 10px;
-      padding: 10px;
-      border: 1px solid #ccc;
-      border-radius: 6px;
+    .author-dot {
+      width: 14px;
+      height: 14px;
+      background: #FF9D00;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+    .author-name {
+      font-size: 14px;
+      color: #111;
+      font-weight: 400;
+      text-decoration: none;
+      cursor: pointer;
+      transition: opacity .3s cubic-bezier(.4,0,.2,1);
+    }
+    .author-name:hover {
+      opacity: .4;
     }
   </style>
 </head>
 <body>
-  <h1>Pinterest Archiver</h1>
-  <p>Collect all image URLs from any Pinterest board, then batch download them.</p>
+  <div class="content">
+    <h1>Pinterest Archiver</h1>
+    <p class="subtitle">Save high res images from your boards to your downloads folder.</p>
 
-  <div class="steps">
     <h3>Installation</h3>
-    <ol>
+    <ol class="install-list">
       <li>Show your bookmarks bar (<code>Cmd+Shift+B</code> on Mac, <code>Ctrl+Shift+B</code> on Windows)</li>
-      <li>Drag this button to your bookmarks bar:</li>
+      <li>Drag <a class="bookmarklet-link" id="bookmarklet-link" href="#"><span class="bookmarklet-dot"></span>Pinterest Archiver</a> to your bookmarks bar</li>
     </ol>
-    <p style="text-align: center; margin: 24px 0;">
-      <a class="bookmarklet-btn" id="bookmarklet-link" href="#">Pinterest Archiver</a>
-    </p>
-    <p style="font-size: 13px; color: #666; text-align: center;">If dragging doesn't work, right-click the button &rarr; "Bookmark Link"</p>
-  </div>
+    <figure>If dragging doesn't work, right-click the button &rarr; "Bookmark Link"</figure>
 
-  <div class="steps">
     <h3>How to Use</h3>
     <ol>
       <li>Go to any Pinterest board page</li>
-      <li>Click "Pinterest Archiver" in your bookmarks</li>
+      <li>Click "Pinterest Archiver" in bookmarks</li>
       <li>An overlay shows the board name and pin count</li>
-      <li>For boards with 200+ pins, choose a section (halves, quarters, eighths)</li>
-      <li>Click to collect URLs - it will scroll through the board</li>
-      <li>Copy all URLs and use a download manager to batch download</li>
+      <li>For boards with 500+ pins, there is the option to download in increments of 2000 pins</li>
+      <li>Clicking start will initiate the download and it will autocomplete when all available pins have been fetched</li>
+      <li>Clicking pause and download will download the currently fetched pins and resume the fetching process when start is clicked</li>
     </ol>
-  </div>
 
-  <div class="note">
-    <strong>Why URLs instead of direct download?</strong><br>
-    Pinterest's security settings block direct downloads from bookmarklets. Instead, this tool collects all the high-resolution (<code>/originals/</code>) image URLs. Use a browser extension like <a href="https://www.downthemall.org/" target="_blank">DownThemAll</a> or <a href="https://chrome.google.com/webstore/detail/tab-save/lkngoeaeclaebmpkgapchgjdbaekacki" target="_blank">Tab Save</a> to batch download them.
-  </div>
+    <figure class="note">This tool isn't perfect and works within Pinterest's limits: pin fetching, rate limiting etc can miss pins and downloading enormous boards (6k+ pins) will be slow.</figure>
 
-  <h2>Troubleshooting</h2>
-  <ul>
-    <li><strong>Nothing happens:</strong> Make sure you're on a Pinterest board page</li>
-    <li><strong>Not finding all pins:</strong> The bookmarklet scrolls automatically - wait for it to finish</li>
-    <li><strong>Some URLs don't work:</strong> Some pins may be videos or have restricted access</li>
-  </ul>
+    <figure class="author">
+      <span class="author-label">Author:</span>
+      <span class="author-dot"></span>
+      <a href="https://www.jbrandford.com" target="_blank" class="author-name">J.Brandford</a>
+    </figure>
+  </div>
 
   <script>
     var bookmarkletCode = "javascript:(function(){var e=document.getElementById('pa-overlay');if(e){e.remove();return}var t=0,n='',r=false;var s=document.createElement('style');s.textContent='#pa-overlay{position:fixed;top:20px;right:20px;width:340px;background:#fff;border-radius:16px;box-shadow:0 4px 24px rgba(0,0,0,.2);z-index:999999;font-family:system-ui,sans-serif;color:#333;max-height:90vh;overflow:auto}#pa-overlay *{box-sizing:border-box}.pa-h{padding:16px;border-bottom:1px solid #eee;display:flex;justify-content:space-between;align-items:center;position:sticky;top:0;background:#fff}.pa-h h2{margin:0;font-size:16px}.pa-x{background:none;border:none;font-size:20px;cursor:pointer;color:#666}.pa-c{padding:16px}.pa-i{margin-bottom:16px}.pa-n{font-size:18px;font-weight:600;margin-bottom:4px}.pa-p{font-size:14px;color:#666}.pa-t{font-size:12px;color:#888;margin:12px 0 8px;text-transform:uppercase}.pa-b{display:block;width:100%;padding:12px;margin-bottom:8px;border:1px solid #ddd;border-radius:8px;background:#fff;font-size:14px;cursor:pointer}.pa-b:hover{background:#f5f5f5}.pa-b:disabled{opacity:.5}.pa-bp{background:#e60023;color:#fff;border-color:#e60023}.pa-bp:hover{background:#ad081b}.pa-r{display:flex;gap:8px}.pa-r .pa-b{flex:1;margin:0}.pa-s{padding:12px;background:#f8f8f8;border-radius:8px;font-size:13px;color:#666;margin-top:12px;display:none}.pa-s.on{display:block}.pa-g{height:4px;background:#eee;border-radius:2px;margin-top:8px}.pa-gb{height:100%;background:#e60023;width:0;transition:width .3s}.pa-m{background:#fff3cd;padding:10px;border-radius:8px;font-size:12px;margin-top:12px;display:none}.pa-m.on{display:block}';document.head.appendChild(s);var crcT=null;function mkCrc(){if(crcT)return crcT;crcT=[];for(var i=0;i<256;i++){var c=i;for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);crcT[i]=c}return crcT}function crc32(d){var tb=mkCrc(),c=0xFFFFFFFF;for(var i=0;i<d.length;i++)c=tb[(c^d[i])&0xFF]^(c>>>8);return(c^0xFFFFFFFF)>>>0}function mkZip(files){var lh=[],ch=[],off=0;for(var i=0;i<files.length;i++){var f=files[i],nm=new TextEncoder().encode(f.name),dt=new Uint8Array(f.data);var loc=new Uint8Array(30+nm.length+dt.length),lv=new DataView(loc.buffer);lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint16(6,0,true);lv.setUint16(8,0,true);lv.setUint16(10,0,true);lv.setUint16(12,0,true);lv.setUint32(14,f.crc,true);lv.setUint32(18,dt.length,true);lv.setUint32(22,dt.length,true);lv.setUint16(26,nm.length,true);lv.setUint16(28,0,true);loc.set(nm,30);loc.set(dt,30+nm.length);lh.push(loc);var cen=new Uint8Array(46+nm.length),cv=new DataView(cen.buffer);cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint16(8,0,true);cv.setUint16(10,0,true);cv.setUint16(12,0,true);cv.setUint16(14,0,true);cv.setUint32(16,f.crc,true);cv.setUint32(20,dt.length,true);cv.setUint32(24,dt.length,true);cv.setUint16(28,nm.length,true);cv.setUint16(30,0,true);cv.setUint16(32,0,true);cv.setUint16(34,0,true);cv.setUint16(36,0,true);cv.setUint32(38,0,true);cv.setUint32(42,off,true);cen.set(nm,46);ch.push(cen);off+=loc.length}var csz=ch.reduce(function(a,b){return a+b.length},0);var end=new Uint8Array(22),ev=new DataView(end.buffer);ev.setUint32(0,0x06054b50,true);ev.setUint16(4,0,true);ev.setUint16(6,0,true);ev.setUint16(8,files.length,true);ev.setUint16(10,files.length,true);ev.setUint32(12,csz,true);ev.setUint32(16,off,true);ev.setUint16(20,0,true);var zip=new Uint8Array(off+csz+22),p=0;for(var j=0;j<lh.length;j++){zip.set(lh[j],p);p+=lh[j].length}for(var k=0;k<ch.length;k++){zip.set(ch[k],p);p+=ch[k].length}zip.set(end,p);return zip}function gi(){var sel=['[data-test-id=\"board-name\"]','h1','[role=\"heading\"]'];for(var i=0;i<sel.length;i++){var el=document.querySelector(sel[i]);if(el&&el.textContent.trim()){n=el.textContent.trim();break}}var pc=document.querySelector('[data-test-id=\"pin-count\"]');if(pc){var m=pc.textContent.match(/[\\d,]+/);if(m)t=parseInt(m[0].replace(/,/g,''),10)}if(!t)t=document.querySelectorAll('[data-test-id=\"pin\"]').length||0;if(!n){var p=location.pathname.split('/').filter(Boolean);n=p[p.length-1]||'board'}return{n:n,t:t}}function esc(x){var d=document.createElement('div');d.textContent=x;return d.innerHTML}function ui(){var i=gi(),d=document.createElement('div');d.id='pa-overlay';var h='<div class=\"pa-h\"><h2>Pinterest Archiver</h2><button class=\"pa-x\" id=\"pa-x\">x</button></div>';h+='<div class=\"pa-c\"><div class=\"pa-i\"><div class=\"pa-n\">'+esc(i.n)+'</div><div class=\"pa-p\">'+i.t.toLocaleString()+' pins</div></div>';h+='<div id=\"pa-btns\"><button class=\"pa-b pa-bp\" data-s=\"0\" data-e=\"1\">Download All</button>';if(i.t>200){h+='<div class=\"pa-t\">By Halves</div><div class=\"pa-r\"><button class=\"pa-b\" data-s=\"0\" data-e=\"0.5\">First Half</button><button class=\"pa-b\" data-s=\"0.5\" data-e=\"1\">Second Half</button></div>';h+='<div class=\"pa-t\">By Quarters</div><div class=\"pa-r\"><button class=\"pa-b\" data-s=\"0\" data-e=\"0.25\">Q1</button><button class=\"pa-b\" data-s=\"0.25\" data-e=\"0.5\">Q2</button><button class=\"pa-b\" data-s=\"0.5\" data-e=\"0.75\">Q3</button><button class=\"pa-b\" data-s=\"0.75\" data-e=\"1\">Q4</button></div>';h+='<div class=\"pa-t\">By Eighths</div><div class=\"pa-r\" style=\"flex-wrap:wrap\">';for(var j=0;j<8;j++){h+='<button class=\"pa-b\" style=\"flex:0 0 calc(25% - 6px);margin-top:'+(j>=4?'8px':'0')+'\" data-s=\"'+(j/8)+'\" data-e=\"'+((j+1)/8)+'\">'+(j+1)+'/8</button>'}h+='</div>'}h+='</div><div class=\"pa-s\" id=\"pa-s\"><span id=\"pa-st\">Starting...</span><div class=\"pa-g\"><div class=\"pa-gb\" id=\"pa-gb\"></div></div></div>';h+='<div class=\"pa-m\" id=\"pa-m\"></div></div>';d.innerHTML=h;document.body.appendChild(d);document.getElementById('pa-x').onclick=function(){d.remove()};var btns=document.querySelectorAll('#pa-btns .pa-b');for(var k=0;k<btns.length;k++){btns[k].onclick=function(ev){if(r)return;go(parseFloat(ev.target.dataset.s),parseFloat(ev.target.dataset.e))}}}function stat(x,p){var se=document.getElementById('pa-s'),st=document.getElementById('pa-st'),gb=document.getElementById('pa-gb');se.classList.add('on');st.textContent=x;if(p!=null)gb.style.width=p*100+'%'}function msg(x){var m=document.getElementById('pa-m');m.classList.add('on');m.innerHTML=x}function dis(v){var b=document.querySelectorAll('#pa-btns .pa-b');for(var i=0;i<b.length;i++)b[i].disabled=v}function sl(ms){return new Promise(function(r){setTimeout(r,ms)})}function orig(u){if(!u||u.indexOf('pinimg.com')===-1)return null;return u.replace(/\\/\\d+x\\d*\\//,'/originals/')}function validImg(u){if(!u||u.indexOf('pinimg.com')===-1)return false;if(u.indexOf('/avatars/')!==-1)return false;if(/\\/(75x75|60x60|50x50|30x30|140x140)(_RS)?\\//.test(u))return false;return true}var pinData=new Map();function extractImg(c){var img=c.querySelector('img[src*=\"pinimg.com\"]');if(img&&validImg(img.src))return orig(img.src);var ss=c.querySelector('img[srcset*=\"pinimg.com\"]');if(ss){var m=(ss.srcset||'').match(/https?:\\/\\/[^\\s,]+pinimg\\.com[^\\s,]+/);if(m&&validImg(m[0]))return orig(m[0])}var ds=c.querySelector('img[data-src*=\"pinimg.com\"]');if(ds){var d=ds.getAttribute('data-src');if(validImg(d))return orig(d)}var vid=c.querySelector('video[poster*=\"pinimg.com\"]');if(vid&&validImg(vid.poster))return orig(vid.poster);var els=c.querySelectorAll('*');for(var i=0;i<els.length;i++){var st=els[i].getAttribute('style')||'';if(st.indexOf('pinimg')!==-1){var bm=st.match(/url\\([\"']?(https?:\\/\\/[^\"')]+pinimg[^\"')]+)/i);if(bm&&validImg(bm[1]))return orig(bm[1])}}return null}function collect(){var links=document.querySelectorAll('a[href*=\"/pin/\"]');links.forEach(function(lk){var m=lk.href.match(/\\/pin\\/(\\d+)/);if(!m)return;var id=m[1];if(pinData.has(id)&&pinData.get(id))return;var c=lk.closest('[data-test-id=\"pin\"]')||lk.closest('[data-test-id=\"pinWrapper\"]')||lk.closest('[data-grid-item=\"true\"]')||lk.closest('[role=\"listitem\"]')||(lk.parentElement&&lk.parentElement.parentElement&&lk.parentElement.parentElement.parentElement);if(!c)return;if(c.closest('header,nav,[data-test-id=\"header\"]'))return;var url=extractImg(c);if(url){pinData.set(id,url)}else if(!pinData.has(id)){pinData.set(id,null)}})}async function scroll(){return new Promise(async function(done){var lc=0,same=0,att=0,target=t||100;stat('Scanning...',0);pinData.clear();async function step(){att++;if(att>300){fin();return}collect();var wi=0;pinData.forEach(function(u){if(u)wi++});var pr=target>0?wi/target:0;stat('Found '+wi+' of '+target+' pins (IDs:'+pinData.size+')...',Math.min(pr,1));if(wi>=target){await sl(500);collect();fin();return}if(wi===lc){same++;if(same>12){if(att<250){stat('Re-scanning...',pr);scrollTo(0,0);await sl(1000);same=0}else{fin();return}}}else{same=0;lc=wi}window.scrollBy(0,innerHeight*.4);await sl(800);window.dispatchEvent(new Event('scroll'));await sl(400);if((innerHeight+scrollY)>=(document.body.offsetHeight-300)){await sl(1500);collect();var nwi=0;pinData.forEach(function(u){if(u)nwi++});if(nwi===wi&&same>5){fin();return}}step()}function fin(){collect();var urls=[];pinData.forEach(function(u){if(u)urls.push(u)});done(urls)}scrollTo(0,0);await sl(1000);collect();var ini=0;pinData.forEach(function(u){if(u)ini++});stat('Initial:'+ini+' pins,'+pinData.size+' IDs. Scrolling...',0);await sl(500);step()})}async function fetchImg(url){try{var res=await fetch(url);if(!res.ok)throw 0;return await res.arrayBuffer()}catch(e){try{var fu=url.replace('/originals/','/736x/');var res2=await fetch(fu);if(!res2.ok)throw 0;return await res2.arrayBuffer()}catch(e2){return null}}}async function go(sp,ep){r=true;dis(true);try{var all=await scroll();var si=Math.floor(all.length*sp),ei=Math.floor(all.length*ep);var urls=all.slice(si,ei);stat('Fetching '+urls.length+' images...',0);msg('<b>Fetching images...</b> This may take a moment.');var files=[],ok=0,fail=0;var sn=n.replace(/[^a-zA-Z0-9]/g,'_');for(var i=0;i<urls.length;i++){var fn=sn+'_'+String(i+1).padStart(4,'0')+'.jpg';stat('Fetching '+(i+1)+' of '+urls.length+'...',(i+1)/urls.length);var data=await fetchImg(urls[i]);if(data){files.push({name:fn,data:data,crc:crc32(new Uint8Array(data))});ok++}else{fail++}if(i%5===0)await sl(50)}stat('Creating zip...',1);await sl(100);var zd=mkZip(files);var blob=new Blob([zd],{type:'application/zip'});var u=URL.createObjectURL(blob);var a=document.createElement('a');a.href=u;a.download=sn+'_pins.zip';document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(u);stat('Done! '+ok+' images in zip'+(fail>0?' ('+fail+' failed)':''),1);msg('<b>Complete!</b> Check Downloads for <code>'+sn+'_pins.zip</code>')}catch(err){stat('Error: '+err.message,0);console.error(err)}r=false;dis(false)}ui()})();";
