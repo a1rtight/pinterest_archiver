@@ -88,7 +88,7 @@
 
   var s = document.createElement('style');
   s.id = 'pa-styles';
-  s.textContent = '#pa-overlay{position:fixed;top:20px;right:20px;width:24rem;background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.30);z-index:999999;font-family:inherit;color:#111;max-height:90vh;overflow:hidden}#pa-overlay *{box-sizing:border-box}.pa-c{padding:1.25rem;overflow-y:auto}.pa-header{display:flex;justify-content:space-between;align-items:center;padding-bottom:.9rem;margin-bottom:.8rem;border-bottom:1px solid #efefef}.pa-header h2{margin:0;font-size:16px;font-weight:400}.pa-x{background:none;border:none;cursor:pointer;color:#767676;padding:0;display:flex;align-items:center;justify-content:center}.pa-n{font-size:1.8rem;font-weight:700;margin:0;padding-top:1.95rem;padding-bottom:.4rem;line-height:1.2}.pa-pin-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.pa-p{font-size:14px;color:#767676}.pa-scan{background:none;border:none;font-size:14px;color:#767676;cursor:pointer;padding:0}.pa-scan:hover{text-decoration:underline}#pa-sections-panel{transition:height 0.25s ease;overflow:hidden}.pa-sec-group{margin-bottom:16px;border-top:1px solid #E4E4E4;padding-top:.5rem;padding-bottom:1.26rem}.pa-sec-header{display:flex;align-items:center;margin-bottom:12px}.pa-sec-header input{width:16px;height:16px;margin:0 10px 0 0;cursor:pointer;-webkit-appearance:none;appearance:none;border-radius:50%;background:#E6E6E6;border:none;position:relative}.pa-sec-header input:checked{background:#111}.pa-sec-header input:checked::after{content:"\\2713";color:#fff;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:10px;line-height:1}.pa-sec-label{font-size:15px;font-weight:400}.pa-sec-list{max-height:140px;overflow-y:auto;margin-left:26px}.pa-sec-item{display:flex;align-items:center;padding:6px 0}.pa-sec-item input{width:14px;height:14px;margin:0 10px 0 0;cursor:pointer;-webkit-appearance:none;appearance:none;border-radius:0;background:#E6E6E6;border:none;position:relative}.pa-sec-item input:checked{background:#111}.pa-sec-item input:checked::after{content:"\\2713";color:#fff;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:9px;line-height:1}.pa-sec-name{flex:1;font-size:14px;color:#111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pa-sec-pins{font-size:14px;color:#767676;margin-left:12px}.pa-main{display:flex;align-items:center;padding:.5rem 0 1.26rem 0;margin-bottom:20px;border-top:1px solid #E4E4E4}.pa-main input{width:16px;height:16px;margin:0 10px 0 0;cursor:pointer;-webkit-appearance:none;appearance:none;border-radius:50%;background:#E6E6E6;border:none;position:relative}.pa-main input:checked{background:#111}.pa-main input:checked::after{content:"\\2713";color:#fff;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:10px;line-height:1}.pa-main-label{font-size:15px;font-weight:400}.pa-main-pins{font-size:15px;color:#767676;margin-left:6px}.pa-btns{display:flex;gap:.2rem;margin-bottom:24px}.pa-btn{flex:1;height:2.4rem;padding:0 20px;border-radius:.6rem;font-size:15px;font-weight:400;cursor:pointer;border:none;transition:background-color .3s cubic-bezier(.4,0,.2,1);display:flex;align-items:center;justify-content:center}.pa-btn:disabled{opacity:.5;cursor:not-allowed}.pa-btn-start{background:#e60023;color:#fff}.pa-btn-start:hover{background:#f4737a}.pa-btn-downloading{background:#f4737a;color:#fff;cursor:default}.pa-btn-pause{background:#111;color:#fff}.pa-btn-done{background:#111;color:#fff;cursor:default}.pa-progress{margin-bottom:20px}.pa-progress-text{font-size:14px;color:#111;margin-bottom:8px}.pa-progress-bar{height:8px;background:#E6E6E6;border-radius:4px;overflow:hidden}.pa-progress-fill{height:100%;background:#000;width:0;transition:width .3s ease}.pa-author{display:flex;align-items:center;padding-top:17px;border-top:1px solid #efefef}.pa-author-label{font-size:14px;color:#111;margin-right:8px}.pa-author-dot{width:14px;height:14px;background:#f5a623;border-radius:50%;margin-right:6px}.pa-author-name{font-size:14px;color:#111;font-weight:400;cursor:pointer;transition:opacity .3s cubic-bezier(.4,0,.2,1)}.pa-author-name:hover{opacity:.4}.pa-m{display:none;padding:12px;background:#fff8e6;border-radius:8px;font-size:13px;margin-bottom:16px}.pa-m.on{display:block}@keyframes pa-spin{to{transform:rotate(360deg)}}.pa-spinner{display:inline-block;width:20px;height:20px;border:2px solid #efefef;border-top-color:#e60023;border-radius:50%;animation:pa-spin 1s linear infinite}.pa-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;color:#767676;font-size:13px}.pa-loading .pa-spinner{margin-bottom:12px}#pa-live-status{display:none;margin-bottom:16px}#pa-live-status.on{display:block}.pa-live{display:inline-block;width:8px;height:8px;background:#e60023;border-radius:50%;margin-right:8px;animation:pa-pulse .8s cubic-bezier(.4,0,.2,1) infinite}.pa-paused{background:#767676;animation:none}@keyframes pa-pulse{0%,100%{background:#e60023}50%{background:#f4737a}}';
+  s.textContent = '#pa-overlay{position:fixed;top:20px;right:20px;width:24rem;background:#fff;border-radius:12px;box-shadow:0 4px 24px rgba(0,0,0,.30);z-index:999999;font-family:inherit;color:#111;max-height:90vh;overflow:hidden}#pa-overlay *{box-sizing:border-box}.pa-c{padding:1.25rem;overflow-y:auto}.pa-header{display:flex;justify-content:space-between;align-items:center;padding-bottom:.9rem;margin-bottom:.8rem;border-bottom:1px solid #efefef}.pa-header h2{margin:0;font-size:16px;font-weight:400}.pa-x{background:none;border:none;cursor:pointer;color:#767676;padding:0;display:flex;align-items:center;justify-content:center}.pa-n{font-size:1.8rem;font-weight:700;margin:0;padding-top:1.95rem;padding-bottom:.4rem;line-height:1.2}.pa-pin-row{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px}.pa-p{font-size:14px;color:#767676}.pa-scan{background:none;border:none;font-size:14px;color:#767676;cursor:pointer;padding:0}.pa-scan:hover{text-decoration:underline}#pa-sections-panel{transition:height 0.25s ease;overflow:hidden}.pa-sec-group{margin-bottom:16px;border-top:1px solid #E4E4E4;padding-top:.5rem;padding-bottom:1.26rem}.pa-sec-header{display:flex;align-items:center;margin-bottom:12px}.pa-sec-header input{width:16px;height:16px;margin:0 10px 0 0;cursor:pointer;-webkit-appearance:none;appearance:none;border-radius:50%;background:#E6E6E6;border:none;position:relative}.pa-sec-header input:checked{background:#111}.pa-sec-header input:checked::after{content:"\\2713";color:#fff;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:10px;line-height:1}.pa-sec-label{font-size:15px;font-weight:400}.pa-sec-list{max-height:140px;overflow-y:auto;margin-left:26px}.pa-sec-item{display:flex;align-items:center;padding:6px 0}.pa-sec-item input{width:14px;height:14px;margin:0 10px 0 0;cursor:pointer;-webkit-appearance:none;appearance:none;border-radius:0;background:#E6E6E6;border:none;position:relative}.pa-sec-item input:checked{background:#111}.pa-sec-item input:checked::after{content:"\\2713";color:#fff;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:9px;line-height:1}.pa-sec-name{flex:1;font-size:14px;color:#111;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pa-sec-pins{font-size:14px;color:#767676;margin-left:12px}.pa-main{display:flex;align-items:center;padding:.5rem 0 1.26rem 0;margin-bottom:20px;border-top:1px solid #E4E4E4}.pa-main input{width:16px;height:16px;margin:0 10px 0 0;cursor:pointer;-webkit-appearance:none;appearance:none;border-radius:50%;background:#E6E6E6;border:none;position:relative}.pa-main input:checked{background:#111}.pa-main input:checked::after{content:"\\2713";color:#fff;position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:10px;line-height:1}.pa-main-label{font-size:15px;font-weight:400}.pa-main-pins{font-size:15px;color:#767676;margin-left:6px}.pa-btns{display:flex;gap:.2rem;margin-bottom:24px}.pa-btn{flex:1;height:2.4rem;padding:0 20px;border-radius:.6rem;font-size:15px;font-weight:400;cursor:pointer;border:none;transition:background-color .3s cubic-bezier(.4,0,.2,1);display:flex;align-items:center;justify-content:center}.pa-btn:disabled{opacity:.5;cursor:not-allowed}.pa-btn-start{background:#e60023;color:#fff}.pa-btn-start:hover{background:#f4737a}.pa-btn-downloading{background:#f4737a;color:#fff;cursor:default}.pa-btn-pause{background:#111;color:#fff}.pa-btn-done{background:#111;color:#fff;cursor:default}.pa-progress{margin-bottom:20px}.pa-progress-text{font-size:14px;color:#111;margin-bottom:8px}.pa-progress-bar{height:8px;background:#E6E6E6;border-radius:4px;overflow:hidden}.pa-progress-fill{height:100%;background:#000;width:0;transition:width .3s ease}.pa-author{display:flex;align-items:center;padding-top:17px;border-top:1px solid #efefef}.pa-author-label{font-size:14px;color:#111;margin-right:8px}.pa-author-dot{width:14px;height:14px;background:#f5a623;border-radius:50%;margin-right:6px}.pa-author-name{font-size:14px;color:#111;font-weight:400;cursor:pointer;transition:opacity .3s cubic-bezier(.4,0,.2,1)}.pa-author-name:hover{opacity:.4}.pa-m{display:none;padding:12px;background:#fff8e6;border-radius:8px;font-size:13px;margin-bottom:16px}.pa-m.on{display:block}@keyframes pa-spin{to{transform:rotate(360deg)}}.pa-spinner{display:inline-block;width:20px;height:20px;border:2px solid #efefef;border-top-color:#e60023;border-radius:50%;animation:pa-spin 1s linear infinite}.pa-loading{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;color:#767676;font-size:13px}.pa-loading .pa-spinner{margin-bottom:12px}#pa-live-status{height:0;overflow:hidden;transition:height 0.25s ease;margin-bottom:16px}.pa-live{display:inline-block;width:8px;height:8px;background:#e60023;border-radius:50%;margin-right:8px;animation:pa-pulse .8s cubic-bezier(.4,0,.2,1) infinite}.pa-paused{background:#767676;animation:none}@keyframes pa-pulse{0%,100%{background:#e60023}50%{background:#f4737a}}';
   document.head.appendChild(s);
 
   function createZip(files) {
@@ -582,9 +582,16 @@
       pauseBtn.disabled = true;
     }
 
-    // Hide live status
+    // Hide live status with animation
     var liveStatus = document.getElementById('pa-live-status');
-    if (liveStatus) liveStatus.classList.remove('on');
+    if (liveStatus && liveStatus.offsetHeight > 0) {
+      liveStatus.style.height = liveStatus.offsetHeight + 'px';
+      requestAnimationFrame(function() {
+        requestAnimationFrame(function() {
+          liveStatus.style.height = '0';
+        });
+      });
+    }
 
     // Hide message area
     var msgArea = document.getElementById('pa-m');
@@ -628,17 +635,18 @@
     html += '<span class="pa-main-pins">(' + mainPinCount + ' pins)</span>';
     html += '</label>';
 
-    panel.innerHTML = html;
-
-    // Re-attach event listeners
-    var selectAllCb = document.getElementById('pa-select-all-sections');
-    if (selectAllCb) {
-      selectAllCb.onchange = function() {
-        document.querySelectorAll('.pa-section-cb[data-idx]').forEach(function(cb) {
-          cb.checked = selectAllCb.checked;
-        });
-      };
-    }
+    animateHeight(panel, function() {
+      panel.innerHTML = html;
+      // Re-attach event listeners after content is set
+      var selectAllCb = document.getElementById('pa-select-all-sections');
+      if (selectAllCb) {
+        selectAllCb.onchange = function() {
+          document.querySelectorAll('.pa-section-cb[data-idx]').forEach(function(cb) {
+            cb.checked = selectAllCb.checked;
+          });
+        };
+      }
+    });
   }
 
   // Start watching for URL changes
@@ -695,8 +703,8 @@
     }
     html += '</div>';
 
-    // Staged download option - only for large boards (>500 pins)
-    if (info.t > 500) {
+    // Staged download option - only for large boards (>2000 pins)
+    if (info.t > 2000) {
       html += '<label class="pa-main">';
       html += '<input type="checkbox" id="pa-staged" checked>';
       html += '<span class="pa-main-label">Staged downloads</span>';
@@ -704,9 +712,9 @@
       html += '</label>';
     }
 
-    // Buttons - show pause only for large boards (>500 pins)
+    // Buttons - show pause only for large boards (>2000 pins)
     html += '<div class="pa-btns">';
-    if (info.t > 500) {
+    if (info.t > 2000) {
       html += '<button class="pa-btn pa-btn-start" id="pa-play">Start</button>';
       html += '<button class="pa-btn pa-btn-pause" id="pa-pause" disabled>Pause & download</button>';
     } else {
@@ -794,14 +802,15 @@
       html += '<span class="pa-main-pins">(' + mainPinCount + ' pins)</span>';
       html += '</label>';
 
-      panel.innerHTML = html;
-
-      var selectAllCb = document.getElementById('pa-select-all-sections');
-      if (selectAllCb) {
-        selectAllCb.onchange = function() {
-          document.querySelectorAll('.pa-section-cb[data-idx]').forEach(function(cb) { cb.checked = selectAllCb.checked; });
-        };
-      }
+      animateHeight(panel, function() {
+        panel.innerHTML = html;
+        var selectAllCb = document.getElementById('pa-select-all-sections');
+        if (selectAllCb) {
+          selectAllCb.onchange = function() {
+            document.querySelectorAll('.pa-section-cb[data-idx]').forEach(function(cb) { cb.checked = selectAllCb.checked; });
+          };
+        }
+      });
     }
     if (!info.section) {
       var sections = await detectSectionsAsync();
@@ -816,6 +825,32 @@
     // Show status in the live status area
     var liveText = document.getElementById('pa-live-text');
     if (liveText) liveText.textContent = text;
+  }
+
+  // Animate height change on an element (used for all widget resizing)
+  function animateHeight(el, callback) {
+    if (!el) return;
+    var oldHeight = el.offsetHeight;
+    // Lock height first to prevent flash
+    el.style.height = oldHeight + 'px';
+    el.style.overflow = 'hidden';
+    // Run callback to change content while height is locked
+    if (callback) callback();
+    // Measure new height by temporarily setting auto
+    el.style.height = 'auto';
+    var newHeight = el.scrollHeight;
+    // Immediately lock back to old height before browser paints
+    el.style.height = oldHeight + 'px';
+    // Force reflow to ensure browser registers the old height
+    el.offsetHeight;
+    // Now animate to new height
+    requestAnimationFrame(function() {
+      el.style.height = newHeight + 'px';
+      setTimeout(function() {
+        el.style.height = 'auto';
+        el.style.overflow = '';
+      }, 250);
+    });
   }
 
   function msg(text) {
@@ -1546,7 +1581,22 @@
     playBtn.classList.add('pa-btn-downloading');
     if (pauseBtn) pauseBtn.disabled = false;
     var liveStatus = document.getElementById('pa-live-status');
-    if (liveStatus) liveStatus.classList.add('on');
+    if (liveStatus) {
+      // Reset any saved-state styles before animating open
+      liveStatus.style.background = '';
+      liveStatus.style.borderRadius = '';
+      liveStatus.style.display = '';
+      liveStatus.style.alignItems = '';
+      liveStatus.style.paddingLeft = '';
+      liveStatus.style.fontSize = '';
+      // Restore original HTML structure if it was replaced by "Saved!" message
+      liveStatus.innerHTML = '<div style="font-size:13px;margin-bottom:4px"><span class="pa-live"></span><span id="pa-live-text">Downloading...</span></div>' +
+        '<div style="font-size:12px;color:#767676">' +
+        '<span id="pa-stat-downloaded">0</span> downloaded · ' +
+        '<span id="pa-stat-queue">0</span> queued · ' +
+        '<span id="pa-stat-active">0</span> active</div>';
+      animateHeight(liveStatus);
+    }
     stat('Starting...', 0);
 
     // Get selected sections from checkboxes
@@ -1871,8 +1921,7 @@
     playBtn.classList.add('pa-btn-start');
     if (pauseBtn) pauseBtn.disabled = true;
 
-    // Hide live status
-    if (liveStatus) liveStatus.classList.remove('on');
+    // Keep live status visible to show "Part X saved" message
     if (liveIndicator) liveIndicator.classList.remove('pa-paused');
 
     // Update progress bar to show cumulative progress
@@ -1930,11 +1979,20 @@
     a.click();
     document.body.removeChild(a);
 
-    stat('Saved! ' + downloadedFiles.length + ' images', 1);
-    msg('<b>Saved!</b> ' + downloadedFiles.length + ' images downloaded.');
-
+    // Transform live status into yellow "saved" box - keep same height (no animation)
     var liveStatus = document.getElementById('pa-live-status');
-    if (liveStatus && !isChunk) liveStatus.classList.remove('on');
+    if (liveStatus && !isChunk) {
+      var fileCount = downloadedFiles.length;
+      // Lock the current height so it doesn't shrink
+      liveStatus.style.height = liveStatus.offsetHeight + 'px';
+      liveStatus.style.background = '#fff8e6';
+      liveStatus.style.borderRadius = '8px';
+      liveStatus.style.display = 'flex';
+      liveStatus.style.alignItems = 'center';
+      liveStatus.style.paddingLeft = '12px';
+      liveStatus.style.fontSize = '13px';
+      liveStatus.innerHTML = '<b>Saved!</b>&nbsp;' + fileCount + ' images downloaded.';
+    }
   }
 
   // Auto-save chunk for staged downloads (saves current batch and continues)
@@ -2102,4 +2160,4 @@
   }
 
   createUI();
-})(); // LATEST VERSION - v17.2 (drain queue completely on pause - no orphaned pins)
+})(); // LATEST VERSION - v17.4 (animated height transitions for all widget resizing)
