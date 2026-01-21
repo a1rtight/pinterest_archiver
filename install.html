@@ -143,6 +143,16 @@
       position: relative;
       top: -1px;
     }
+    @media (min-width: 1800px) {
+      body {
+        grid-template-columns: 1fr 800px 800px 1fr;
+      }
+      .feature-image {
+        left: calc(50vw - 800px);
+        width: 640px;
+        max-width: none;
+      }
+    }
     @media (max-width: 1200px) {
       body {
         grid-template-columns: .3fr 3.4fr 3.4fr .3fr;
@@ -169,7 +179,7 @@
         position: static;
         transform: none;
         width: 100%;
-        max-width: 400px;
+        max-width: none;
         margin: 1.6rem 0;
       }
       ol:not(.install-list) {
@@ -197,7 +207,7 @@
     </ol>
     <figure>If dragging doesn't work, right-click the button &rarr; "Bookmark Link"</figure>
 
-    <img class="feature-image" src="Circular_pins48.jpg" alt="Pinterest Archiver">
+    <video class="feature-image" src="tester.mp4" autoplay muted playsinline loop></video>
 
     <h3>How to use</h3>
     <ol>
@@ -209,12 +219,12 @@
       <li>Clicking pause and download will download the currently fetched pins and resume the fetching process when start is clicked</li>
     </ol>
 
-    <figure class="note">This tool isn't perfect and works within Pinterest's limits: pin fetching, rate limiting etc can miss pins and downloading enormous boards (6k+ pins) will be slow.</figure>
+    <figure class="note">While functional, this tool isn't perfect and works within Pinterest's limits. Pin fetching, rate limiting etc can impact performance. Downloading enormous boards (6k+ pins) will take some time.</figure>
 
     <figure class="author">
       <span class="author-label">Author:</span>
       <span class="author-dot"></span>
-      <a href="https://www.jbrandford.com" target="_blank" class="author-name">J.Brandford</a>&ensp;<span class="author-divider">|</span>&ensp;<a href="https://uk.pinterest.com/a1rtight/" target="_blank" class="author-name">Pinterest</a>
+      <a href="https://www.jbrandford.com" target="_blank" class="author-name">J.Brandford</a>&ensp;<span class="author-divider">|</span>&ensp;<a href="https://uk.pinterest.com/a1rtight/" target="_blank" class="author-name">↗ Pinterest</a>
     </figure>
   </div>
 
@@ -232,3 +242,4 @@
   </script>
 </body>
 </html>
+<!-- v1.0.0 -->
