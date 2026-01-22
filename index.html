@@ -4,12 +4,17 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Pinterest Archiver - Install</title>
-  <link rel="preload" href="fav.png" as="image">
-  <link rel="icon" type="image/png" sizes="32x32" href="fav.png">
-  <link rel="icon" type="image/png" sizes="16x16" href="fav.png">
-  <link rel="icon" href="favicon.ico" sizes="any">
-  <link rel="shortcut icon" href="favicon.ico">
-  <link rel="apple-touch-icon" href="fav.png">
+  <meta name="description" content="Open source image downloader for Pinterest. Save boards to the downloads folder instantly, no strings attached.">
+  <meta property="og:title" content="Pinterest Archiver">
+  <meta property="og:description" content="Open source image downloader for Pinterest. Save boards to the downloads folder instantly, no strings attached.">
+  <meta property="og:image" content="https://a1rtight.github.io/pinterest_archiver/img/og.jpg">
+  <meta property="og:url" content="https://a1rtight.github.io/pinterest_archiver/">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" type="image/png" sizes="32x32" href="img/fav.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="img/fav.png">
+  <link rel="shortcut icon" type="image/png" href="img/fav.png">
+  <link rel="apple-touch-icon" href="img/fav.png">
   <style>
     * { box-sizing: border-box; }
     body {
@@ -99,9 +104,10 @@
     .install-list {
       list-style: none;
       padding-left: 0;
-    }
-    .install-list + figure {
       margin-bottom: 1.6rem;
+    }
+    .install-list li:last-child {
+      margin-bottom: 0;
     }
     ol:not(.install-list) {
       margin-bottom: 1.6rem;
@@ -207,9 +213,10 @@
       <li>Show your bookmarks bar (Cmd+Shift+B on Mac, Ctrl+Shift+B on Windows)</li>
       <li>Drag <a class="bookmarklet-link" id="bookmarklet-link" href="#"><span class="bookmarklet-dot"></span>Pinterest Archiver</a> to your bookmarks bar</li>
     </ol>
-    <figure>If dragging doesn't work, right-click the button &rarr; "Bookmark Link"</figure>
 
-    <video class="feature-image" src="tester.mp4" autoplay muted playsinline loop></video>
+    <video class="feature-image" autoplay muted playsinline loop preload="auto">
+      <source src="tester.mp4" type="video/mp4">
+    </video>
 
     <h3>How to use</h3>
     <ol>
