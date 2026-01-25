@@ -178,11 +178,12 @@
         grid-template-columns: 1fr;
         padding: 0 1rem;
         margin-bottom: 0;
+        padding-bottom: 0;
       }
       .content {
         grid-column: 1;
         max-width: 450px;
-        min-height: 100vh;
+        padding-bottom: 0;
       }
       .feature-image {
         position: static;
@@ -192,15 +193,21 @@
         margin: 1.6rem 0;
       }
       ol:not(.install-list) {
-        margin-bottom: 8rem;
+        margin-bottom: 1.6rem;
       }
       .author {
-        position: sticky;
+        position: fixed;
         bottom: 0;
         left: 0;
+        right: 0;
         width: 100%;
-        padding: 1rem 0;
-        margin-top: 2rem;
+        padding: 1rem;
+        margin-top: 0;
+        transform: translateY(100%);
+        transition: transform 0.3s ease;
+      }
+      .author.visible {
+        transform: translateY(0);
       }
       .note {
         margin-bottom: 0;
@@ -253,6 +260,33 @@
       e.preventDefault();
       alert('Drag this button to your bookmarks bar to install it.');
     });
+
+    // Mobile footer scroll behavior (680px breakpoint)
+    (function() {
+      var footer = document.querySelector('.author');
+      var video = document.querySelector('.feature-image');
+      if (!footer || !video) return;
+
+      function checkFooterVisibility() {
+        // Only apply at mobile breakpoint
+        if (window.innerWidth > 680) {
+          footer.classList.remove('visible');
+          return;
+        }
+
+        var videoRect = video.getBoundingClientRect();
+        // Show footer when bottom of video is above bottom of viewport
+        if (videoRect.bottom <= window.innerHeight) {
+          footer.classList.add('visible');
+        } else {
+          footer.classList.remove('visible');
+        }
+      }
+
+      window.addEventListener('scroll', checkFooterVisibility, { passive: true });
+      window.addEventListener('resize', checkFooterVisibility);
+      checkFooterVisibility();
+    })();
   </script>
 </body>
 </html>
