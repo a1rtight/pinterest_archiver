@@ -2,6 +2,12 @@
 // Downloads pin images into a single zip file with section support
 
 (function() {
+  // Check if on Pinterest
+  if (!location.hostname.includes('pinterest.')) {
+    alert('Pinterest Archiver only works on Pinterest pages.');
+    return;
+  }
+
   var e = document.getElementById('pa-overlay');
   if (e) { e.remove(); return; }
 

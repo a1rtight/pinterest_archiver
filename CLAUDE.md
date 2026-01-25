@@ -1152,3 +1152,60 @@ Since we scroll DOWN continuously, failed pins in the middle of a chunk may not 
 - Pinterest's DOM structure changes frequently, may require selector updates
 - Large boards may timeout or miss some pins
 - DOM removal can break Pinterest's lazy loading on very large boards
+
+## Usage Tracking (Google Sheets Integration)
+
+### Overview
+
+The bookmarklet tracks anonymous usage stats to a Google Sheet via Google Apps Script. Each completed download logs:
+- Timestamp
+- Anonymous user ID (random, stored in localStorage)
+- Number of pins downloaded
+- Number of sections
+
+### Why `fetch()` Failed
+
+Pinterest enforces a strict **Content Security Policy (CSP)** with a `connect-src` directive that blocks `fetch()` and `XMLHttpRequest` to unauthorized domains like `script.google.com`.
+
+Error:
+```
+Refused to connect to https://script.google.com/... because it does not appear in the connect-src directive of the Content Security Policy.
+```
+
+### Why Image Pixel Works
+
+CSP `img-src` directives are typically more permissive than `connect-src`. By using `new Image().src = url`, the request is treated as an image load rather than an API call, bypassing the CSP restriction.
+
+```javascript
+// ❌ Blocked by CSP
+fetch('https://script.google.com/macros/s/.../exec?uid=...');
+
+// ✅ Works - image requests bypass connect-src
+new Image().src = 'https://script.google.com/macros/s/.../exec?uid=...';
+```
+
+### Implementation
+
+```javascript
+// Track usage (non-blocking, uses image pixel to bypass CSP)
+try {
+  var uid = localStorage.getItem('pa_uid');
+  if (!uid) {
+    uid = 'u_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('pa_uid', uid);
+  }
+  new Image().src = 'https://script.google.com/macros/s/.../exec?uid=' + uid + '&pins=' + downloadedFiles.length + '&sections=' + boardSections.length;
+} catch(e) {}
+```
+
+### Google Apps Script
+
+```javascript
+function doGet(e) {
+  var s = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
+  s.appendRow([new Date(), e.parameter.uid, e.parameter.pins, e.parameter.sections]);
+  return ContentService.createTextOutput("ok");
+}
+```
+
+Deploy as: Web app → Execute as: Me → Who has access: Anyone
