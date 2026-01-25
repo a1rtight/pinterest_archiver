@@ -182,6 +182,7 @@
       .content {
         grid-column: 1;
         max-width: 450px;
+        min-height: 100vh;
       }
       .feature-image {
         position: static;
@@ -194,12 +195,15 @@
         margin-bottom: 8rem;
       }
       .author {
-        left: 1rem;
-        width: calc(100% - 2rem);
+        position: sticky;
+        bottom: 0;
+        left: 0;
+        width: 100%;
         padding: 1rem 0;
+        margin-top: 2rem;
       }
       .note {
-        margin-bottom: 5rem;
+        margin-bottom: 0;
       }
     }
   </style>
