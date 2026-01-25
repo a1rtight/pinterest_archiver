@@ -1986,7 +1986,7 @@
         uid = 'u_' + Math.random().toString(36).substr(2, 9);
         localStorage.setItem('pa_uid', uid);
       }
-      fetch('https://script.google.com/macros/s/AKfycbwY6ucNutUD6QEUktm7lw39Tpb9rc1FJxFYjTUnHAK7rNtIlIzwIImDHEe3ORhZFtUY/exec?uid=' + uid + '&pins=' + downloadedFiles.length + '&sections=' + boardSections.length);
+      fetch('https://script.google.com/macros/s/AKfycbzt7QwjlKBKoDebJ1gjpttABcmuwloVJEYp2nCGKPmdrmVTe3vI0H_ArAYr8ldqudUR/exec?uid=' + uid + '&pins=' + downloadedFiles.length + '&sections=' + boardSections.length);
     } catch(e) {}
 
     // Transform live status into yellow "saved" box - keep same height (no animation)
