@@ -1979,14 +1979,14 @@
     a.click();
     document.body.removeChild(a);
 
-    // Track usage (non-blocking)
+    // Track usage (non-blocking, uses image pixel to bypass CSP)
     try {
       var uid = localStorage.getItem('pa_uid');
       if (!uid) {
         uid = 'u_' + Math.random().toString(36).substr(2, 9);
         localStorage.setItem('pa_uid', uid);
       }
-      fetch('https://script.google.com/macros/s/AKfycbztGS_9YdiXJS0wRzZnVyY_MurfomQr8RyOxjg6ppYyls4_A3sL1LqXY2_MMjXzLG-G/exec?uid=' + uid + '&pins=' + downloadedFiles.length + '&sections=' + boardSections.length);
+      new Image().src = 'https://script.google.com/macros/s/AKfycbztGS_9YdiXJS0wRzZnVyY_MurfomQr8RyOxjg6ppYyls4_A3sL1LqXY2_MMjXzLG-G/exec?uid=' + uid + '&pins=' + downloadedFiles.length + '&sections=' + boardSections.length;
     } catch(e) {}
 
     // Transform live status into yellow "saved" box - keep same height (no animation)
