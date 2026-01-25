@@ -1209,3 +1209,22 @@ function doGet(e) {
 ```
 
 Deploy as: Web app → Execute as: Me → Who has access: Anyone
+
+## Video Poster Image
+
+### The Problem
+
+When using a poster image with `<video>`, there can be a visible "flash" when the video starts playing if the poster doesn't exactly match the video's first frame. This happens due to:
+- Color profile differences between image and video formats
+- Compression artifacts rendering colors differently
+- Video codec gamma interpretation
+
+### The Solution
+
+Extract the poster directly from the compressed video so colors match exactly:
+
+```bash
+ffmpeg -i tester.mp4 -vframes 1 -f image2 img/holding_img.webp -y
+```
+
+This ensures the poster and video first frame are from the same source with identical color profiles, eliminating any flash on playback start.
