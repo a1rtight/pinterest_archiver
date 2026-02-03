@@ -24,6 +24,10 @@ Images download as a ZIP file with folders for each section.
 - Pause and resume functionality
 - No extension or signup required
 
+## License
+
+[MIT](LICENSE)
+
 ## Author
 
 [J.Brandford](https://www.jbrandford.com)
